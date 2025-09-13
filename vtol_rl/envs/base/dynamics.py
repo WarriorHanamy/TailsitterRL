@@ -134,7 +134,7 @@ class Dynamics:
 
     def _set_device(self, device):
         self._c = self._c.to(device)
-        self._thrust_map = self._thrust_map.to(device)
+        self._rotor_speed_to_thrust_coefs = self._rotor_speed_to_thrust_coefs.to(device)
         self._B_allocation = self._B_allocation.to(device)
         self._B_allocation_inv = self._B_allocation_inv.to(device)
         self.m = self.m.to(device)
@@ -301,9 +301,6 @@ class Dynamics:
                 )
             )
             self._orientation = self._orientation.normalize()
-        print(self._t)
-        print(self.ctrl_period)
-        exit()
         self._t += self.ctrl_period
         
 
@@ -460,29 +457,33 @@ class Dynamics:
             _type_: _description_
         """
         _thrusts = (
-                (self._thrust_map[0] * (_motor_omega+0).pow(2))
-                + self._thrust_map[1] * _motor_omega
-                + self._thrust_map[2]
+                (self._rotor_speed_to_thrust_coefs[0] * (_motor_omega).pow(2))
+                + self._rotor_speed_to_thrust_coefs[1] * _motor_omega
+                + self._rotor_speed_to_thrust_coefs[2]
         )
         return _thrusts
 
     def _compute_rotor_omega(self, _thrusts) -> torch.Tensor:
-        """_summary_
-            compute the rotor omega from the _thrusts by solving quadratic equation
-        Args:
-            thrusts_des (_type_): _description_
-        Returns:
-            _type_: _description_
         """
-        scale = 1 / (2 * self._thrust_map[0])
+        Compute rotor angular speed omega from desired thrust(s) by inverting:
+            T(omega) = a*omega^2 + b*omega + c
+        This is a element-wise operation. Uses the positive root of the quadratic formula.
+
+        Args:
+            thrusts: Tensor of desired thrust [N], shape (4,1).
+
+        Returns:
+            omega: Tensor of angular speed [rad/s], shape (4,1), clamped to >= 0.
+        """
+        scale = 1 / (2 * self._rotor_speed_to_thrust_coefs[0])  # 1/(2a)
         # yi yuan er ci han shu
         omega = scale * (
-                -self._thrust_map[1]
+                -self._rotor_speed_to_thrust_coefs[1]
                 + torch.sqrt(
-            self._thrust_map[1].pow(2)
-            - 4 * self._thrust_map[0] * (self._thrust_map[2] - _thrusts)
+            self._rotor_speed_to_thrust_coefs[1].pow(2)
+            - 4 * self._rotor_speed_to_thrust_coefs[0] * (self._rotor_speed_to_thrust_coefs[2] - _thrusts)
         )
-        )
+        ) # positive soluitno of quadratic formula 
         return omega
 
     def set_seed(self, seed=42):
@@ -506,7 +507,7 @@ class Dynamics:
         self._POSITION_PID = PID(p=torch.tensor(data["POSITION_PID"]["p"]), i=torch.tensor(data["POSITION_PID"]["i"]), d=torch.tensor(data["POSITION_PID"]["d"]))
         self._kappa = torch.tensor(data["kappa"])
         self._arm_length = torch.tensor(data["arm_length"])
-        self._thrust_map = torch.tensor(data["thrust_map"])
+        self._rotor_speed_to_thrust_coefs = torch.tensor(data["rotor_speed_to_thrust_coefs"])
         self._motor_tau_inv = torch.tensor(1 / data["motor_tau"])
         self._c = torch.exp(-self._motor_tau_inv * self.sim_time_step)
         self._bd_rotor_omega = bound(
@@ -515,9 +516,9 @@ class Dynamics:
         )
         self._bd_thrust = bound(
             max= \
-                self._thrust_map[0] * self._bd_rotor_omega.max ** 2
-                + self._thrust_map[1] * self._bd_rotor_omega.max
-                + self._thrust_map[2]
+                self._rotor_speed_to_thrust_coefs[0] * self._bd_rotor_omega.max ** 2
+                + self._rotor_speed_to_thrust_coefs[1] * self._bd_rotor_omega.max
+                + self._rotor_speed_to_thrust_coefs[2]
             ,
             min=0,
         )
@@ -747,4 +748,5 @@ if __name__ == "__main__":
     for _ in range(10):
         action = torch.tensor([[0.0, 0.0, 0.0, 1.0]])
         state = env.step(action)
+        print(state)
         print(env.acceleration)
