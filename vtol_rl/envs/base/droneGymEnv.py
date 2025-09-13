@@ -9,7 +9,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 import torch as th
 from habitat_sim import SensorType
-from ...utils.type import ACTION_TYPE, TensorDict
+from vtol_rl.utils.type import ACTION_TYPE, TensorDict
 
 sensor_type_alias = {
     "depth": SensorType.DEPTH,

@@ -1,10 +1,10 @@
 import numpy as np
 from .dynamics import Dynamics
-from ...utils.ObjectManger import ObjectManager
-from ...utils.SceneManager import SceneManager
+from vtol_rl.utils.ObjectManger import ObjectManager
+from vtol_rl.utils.SceneManager import SceneManager
 from typing import List, Union, Tuple, Dict, Optional
-from ...utils.randomization import UniformStateRandomizer, NormalStateRandomizer, UnionRandomizer, load_generator, TargetUniformRandomizer
-from ...utils.type import Uniform, Normal
+from vtol_rl.utils.randomization import UniformStateRandomizer, NormalStateRandomizer, UnionRandomizer, load_generator, TargetUniformRandomizer
+from vtol_rl.utils.type import Uniform, Normal
 from torch import Tensor
 from typing import Optional, Type
 import torch as th

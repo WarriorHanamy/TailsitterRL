@@ -7,7 +7,7 @@ from gymnasium import spaces
 from scipy.ndimage import center_of_mass
 import matplotlib.pyplot as plt
 
-from ..utils.type import TensorDict
+from vtol_rl.utils.type import TensorDict
 
 
 class LandingEnv(DroneGymEnvsBase):

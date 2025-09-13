@@ -9,8 +9,8 @@ import torch as th
 from habitat_sim import SensorType
 from gymnasium import spaces
 
-from ..utils.tools.train_encoder import model as encoder
-from ..utils.type import TensorDict
+from vtol_rl.utils.tools.train_encoder import model as encoder
+from vtol_rl.utils.type import TensorDict
 
 
 def get_along_vertical_vector(base, obj):

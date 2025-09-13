@@ -4,7 +4,7 @@ import numpy as np
 import torch as th
 
 from .base.droneGymEnv import DroneGymEnvsBase
-from ..utils.randomization import UniformStateRandomizer, NormalStateRandomizer
+from vtol_rl.utils.randomization import UniformStateRandomizer, NormalStateRandomizer
 
 g = th.tensor([[0, 0, -9.8]])
 

@@ -4,8 +4,8 @@ import torch as th
 import magnum as mn
 from scipy.interpolate import CubicSpline
 from .common import std_to_habitat
-from ..utils.randomization import UniformStateRandomizer, NormalStateRandomizer, StateRandomizer, load_generator, load_dist
-from ..utils.datasets.datasets import get_files_with_suffix
+from vtol_rl.utils.randomization import UniformStateRandomizer, NormalStateRandomizer, StateRandomizer, load_generator, load_dist
+from vtol_rl.utils.datasets.datasets import get_files_with_suffix
 import os, sys
 import json
 import copy
