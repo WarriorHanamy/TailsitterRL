@@ -6,6 +6,11 @@
 - [newton](https://github.com/newton-physics/newton)
 
 
+# Installation
+```shell
+mamba env create -f environment.yml
+mamba activate rl
+```
 
 
 # ToDo Lists

@@ -1,0 +1,20 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=61.0"]
+
+[project]
+authors = [
+  {name = "Hanamy", email = "rongerch@outlook.com"},
+]
+dependencies = [
+  "numpy",
+]
+description = "Reinforcement Learning for Tailsitter UAVs"
+license = {text = "MIT"}
+name = "vtol_rl"
+readme = "README.md"
+requires-python = ">=3.8"
+version = "0.1.0"
+
+[tool.setuptools.packages.find]
+where = ["."]
