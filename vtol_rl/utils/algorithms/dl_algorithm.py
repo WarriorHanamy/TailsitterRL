@@ -15,7 +15,7 @@ import os, sys
 from collections import deque
 from stable_baselines3.common import logger
 from utils.policies.dl_policies import BaseApgPolicy, ActorPolicy
-from utils.algorithms.ppo import ppo
+from utils.algorithms.PPO import ppo
 
 
 class ApgBase:

@@ -11,7 +11,11 @@
 mamba env create -f environment.yml
 mamba activate rl
 ```
+Check which pip (Linux/macOS) or where pip (Windows) first to confirm you’re using the virtual environment’s pip—avoid breaking your system Python.
 
+```shell
+pip install -e .
+```
 
 # ToDo Lists
 - [] quadrotor forward flight maintaining height (drag).

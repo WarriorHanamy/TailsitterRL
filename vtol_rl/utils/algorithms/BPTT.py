@@ -10,15 +10,15 @@ import random
 
 import numpy as np
 import torch as th
-from VisFly.utils.policies.td_policies import CnnPolicy, BasePolicy, MultiInputPolicy
+from vtol_rl.utils.policies.td_policies import CnnPolicy, BasePolicy, MultiInputPolicy
 from stable_baselines3.sac.policies import MultiInputPolicy as SACMultiInputPolicy
 # from torch.distributions import
 from stable_baselines3.common.type_aliases import Schedule
 from stable_baselines3.common.utils import get_schedule_fn
 from tqdm import tqdm
 from stable_baselines3.common.utils import polyak_update, get_parameters_by_name
-from VisFly.utils.algorithms.lr_scheduler import transfer_schedule
-from VisFly.utils.test.debug import get_network_statistics, check_none_parameters
+from vtol_rl.utils.algorithms.lr_scheduler import transfer_schedule
+from vtol_rl.utils.test.debug import get_network_statistics, check_none_parameters
 from copy import deepcopy
 from stable_baselines3.common.utils import safe_mean
 

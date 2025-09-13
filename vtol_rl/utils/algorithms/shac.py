@@ -9,16 +9,16 @@ import random
 
 import numpy as np
 import torch as th
-from VisFly.utils.policies.td_policies import CnnPolicy, BasePolicy, MultiInputPolicy
+from vtol_rl.utils.policies.td_policies import CnnPolicy, BasePolicy, MultiInputPolicy
 # from torch.distributions import
 from stable_baselines3.common.type_aliases import Schedule
 from stable_baselines3.common.utils import get_schedule_fn, safe_mean, update_learning_rate
 from tqdm import tqdm
 from stable_baselines3.common.utils import polyak_update, get_parameters_by_name
-from VisFly.utils.algorithms.lr_scheduler import  transfer_schedule
+from vtol_rl.utils.algorithms.lr_scheduler import  transfer_schedule
 from copy import deepcopy
 from .common import compute_td_returns, DataBuffer3, SimpleRolloutBuffer
-from VisFly.utils.common import set_seed
+from vtol_rl.utils.common import set_seed
 
 is_BP_value = True
 
