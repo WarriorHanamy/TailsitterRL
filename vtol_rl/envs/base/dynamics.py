@@ -276,7 +276,7 @@ class Dynamics:
             force_torque = self._B_allocation @ self._thrusts  # 计算力矩
 
             # compute linear acceleration and body torque
-            velocity_body = self._orientation.inv_rotate(self._velocity+0)  # (3, N)
+            velocity_body = self._orientation.inv_rotate(self._velocity)  # (3, N)
             linear_drag = self._linear_drag_coeffs * velocity_body
             quadratic_drag = self._quad_drag_coeffs * velocity_body * velocity_body.abs()
             drag = linear_drag + quadratic_drag
