@@ -4,6 +4,7 @@
 - [spinningup](https://github.com/openai/spinningup)
 - [gymnasium](https://github.com/Farama-Foundation/Gymnasium)
 - [newton](https://github.com/newton-physics/newton)
+- [OmniDrones](https://github.com/btx0424/OmniDrones)
 
 
 # Convetions
