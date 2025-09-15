@@ -6,6 +6,11 @@
 - [newton](https://github.com/newton-physics/newton)
 
 
+# Convetions
+1. actions are always normalized into [-1, 1]
+2. commands are denormalized from actions, serving for the physical purpose.
+
+
 # Installation
 ```shell
 mamba env create -f environment.yml

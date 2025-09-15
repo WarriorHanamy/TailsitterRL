@@ -4,7 +4,7 @@ import sys
 import numpy as np
 from .base.droneGymEnv import DroneGymEnvsBase
 from typing import Union, Tuple, List, Optional, Dict
-import torch as th
+import torch
 from habitat_sim import SensorType
 from gymnasium import spaces
 from vtol_rl.utils.tools.train_encoder import model as encoder
@@ -24,7 +24,7 @@ class DynEnv(DroneGymEnvsBase):
             scene_kwargs: dict = {},
             sensor_kwargs: list = [],
             device: str = "cpu",
-            target: Optional[th.Tensor] = None,
+            target: Optional[torch.Tensor] = None,
             max_episode_steps: int = 256,
             tensor_output: bool = False,
     ):
@@ -64,16 +64,16 @@ class DynEnv(DroneGymEnvsBase):
 
         return obs
 
-    def get_success(self) -> th.Tensor:
-        return th.full((self.num_agent,), False)
+    def get_success(self) -> torch.Tensor:
+        return torch.full((self.num_agent,), False)
 
-    def get_reward(self) -> th.Tensor:
+    def get_reward(self) -> torch.Tensor:
         base_r = 0.1
         pos_factor = -0.1 * 1/9
         reward = (
                 base_r +
                  (self.position - 0).norm(dim=1) * pos_factor +
-                 (self.orientation - th.tensor([1, 0, 0, 0])).norm(dim=1) * -0.00001 +
+                 (self.orientation - torch.tensor([1, 0, 0, 0])).norm(dim=1) * -0.00001 +
                  (self.velocity - 0).norm(dim=1) * -0.002 +
                  (self.angular_velocity - 0).norm(dim=1) * -0.002
         )

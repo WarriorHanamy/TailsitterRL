@@ -35,9 +35,11 @@ class Dynamics:
             drag_random: float = 0,
             cfg: str = "drone_state",
     ):
-        assert action_type in ["bodyrate", "thrust", "velocity", "position"]  # 对两个变量进行断言检查
-        assert ori_output_type in ["quaternion", "euler"]
-
+        # assert action_type in ["bodyrate", "thrust", "velocity", "position"]  
+        # assert ori_output_type in ["quaternion", "euler"]
+        assert action_type in ["bodyrate"]  
+        assert ori_output_type in ["quaternion"]
+        
         self.device = device
 
         # iterative variables
@@ -86,6 +88,9 @@ class Dynamics:
         except FileNotFoundError as e:
             print(f"Error loading config file for Dynamics: {e.filename}")
             raise 
+        
+        # 2(CW) ... 3(CCW)
+        # 1(CCW) ... 0(CW)
         motor_direction = torch.tensor([
             [1, -1, -1, 1, ],
             [-1, -1, 1, 1],
@@ -102,6 +107,9 @@ class Dynamics:
         )
         self._B_allocation_inv = torch.inverse(self._B_allocation)
 
+        print(f"B allocation\n: {self._B_allocation}")
+        print(f"B allocation inv\n: {self._B_allocation_inv}")
+        
         self._position = torch.zeros((3, self.num), device=self.device)  
         self._orientation = Quaternion(num=self.num, device=self.device)  
         self._velocity = torch.zeros((3, self.num), device=self.device)  
@@ -263,9 +271,9 @@ class Dynamics:
             self._pre_action.pop(0)
         else:
             action = action
-
+        # print(f"action: {action.shape} {action}")
         command = self._de_normalize(action.to(self.device))
-
+        # print(f"command: {command.shape} {command}")
         thrust_des = self._get_thrust_from_cmd(command)  #
         assert (thrust_des <= self._bd_thrust.max).all()  # debug
 
@@ -328,102 +336,21 @@ class Dynamics:
         """
         if self.action_type == ACTION_TYPE.THRUST:
             thrusts_des = command
+        # REC MARK: I remove position and velocity control for simplicity
         elif self.action_type == ACTION_TYPE.BODYRATE:
-            angular_velocity_error = command[1:] - self._angular_velocity
+            assert command.shape == (4,1)
+            angular_velocity_error = command[1:, :] - self._angular_velocity
             # self._ctrl_i += (self._BODYRATE_PID.i @ (angular_velocity_error * self.sim_time_step))
             # self._ctrl_i = self._ctrl_i.clip(min=-3, max=3)
             body_torque_des = \
                 self._inertia @ self._BODYRATE_PID.p @ angular_velocity_error \
-                + cross(self._angular_velocity + 0, self._inertia @ (self._angular_velocity + 0)) \
                 - self._BODYRATE_PID.d @ self._angular_acc
+                # + cross(self._angular_velocity + 0, self._inertia @ (self._angular_velocity + 0)) \   REC MARK: I don't like this term.
             # + self._ctrl_i \
 
-            thrusts_torque = torch.cat([command[0:1, :], body_torque_des])
-            thrusts_des = self._B_allocation_inv @ thrusts_torque
-        elif self.action_type == ACTION_TYPE.VELOCITY:
-            command = command.T
-            a_des = self._VELOCITY_PID.p * (command[1:] - self._velocity)
-            F_des = self.m * (a_des - g)  # world axis
-
-            # Auto yaw control - make drone face velocity direction
-            velocity_horizontal = self._velocity[:2, :]  # Get x,y components
-            velocity_norm = velocity_horizontal.norm(dim=0)
-            # Only update yaw when there's significant horizontal movement
-            yaw_des = torch.where(
-                velocity_norm > 0.1,  # threshold to avoid jitter when stationary
-                torch.atan2(velocity_horizontal[1], velocity_horizontal[0]),
-                self._orientation.toEuler()[2]  # keep current yaw when stationary
-            )
-
-            current_yaw = self._orientation.toEuler()[2]
-            yaw_error = yaw_des - current_yaw
-            # Handle yaw angle wrapping (keep error in [-π, π])
-            yaw_error = torch.atan2(torch.sin(yaw_error), torch.cos(yaw_error))
-            yaw_spd_des = yaw_error * self._VELOCITY_PID.d * 2.0  # Gain for yaw tracking
-
-            gross_thrust_des = self._orientation.transform(F_des)[2]
-            R = self._orientation.R
-            b3_des = F_des / F_des.norm(dim=0)
-            c1_des = torch.stack([yaw_des.cos(), yaw_des.sin(), torch.zeros_like(yaw_des)], dim=0)
-            b2_des = cross(b3_des, c1_des)
-            b2_des = b2_des / b2_des.norm(dim=0)
-            b1_des = cross(b2_des, b3_des)
-            R_des = torch.stack([b1_des, b2_des, b3_des]).transpose(0, 1)
-
-            pose_err = torch.zeros_like(self._position)
-            ang_vel_err = torch.zeros_like(self._position)
-            for i in range(self.num):
-                m = 0.5 * (R_des[..., i].T @ R[..., i] - R[..., i].T @ R_des[..., i])
-                pose_err[:, i] = -torch.as_tensor([-m[1, 2], m[0, 2], -m[0, 1]], device=self.device)
-
-                ang_vel_err[:, i] = (R_des[..., i].T @ R[..., i] @ torch.tensor([[0], [0], [yaw_spd_des[i]]], device=self.device).squeeze() - self._angular_velocity[:, i])
-            body_torque_des = self._inertia @ (self._BODYRATE_PID.p @ pose_err + self._BODYRATE_PID.p @ ang_vel_err - cross(self._angular_velocity, self._angular_velocity))
-
-            thrusts_des = self._B_allocation_inv @ torch.vstack([gross_thrust_des, body_torque_des])
-        elif self.action_type == ACTION_TYPE.POSITION:
-            command = command.T
-            v_des = self._POSITION_PID.d * (command[1:] - self._position)
-            a_des = self._VELOCITY_PID.d * (v_des - self._velocity)
-            F_des = self.m * (a_des - g)  # world axis
-
-            # Use command[0] as desired yaw angle instead of auto yaw control
-            yaw_des = command[0]  # Direct yaw control from command input
-
-            current_yaw = self._orientation.toEuler()[2]
-            yaw_error = yaw_des - current_yaw
-            # Handle yaw angle wrapping (keep error in [-π, π])
-            # 确保角度误差在最短路径上，处理角度环绕问题
-            yaw_error = torch.atan2(torch.sin(yaw_error), torch.cos(yaw_error))
-            yaw_spd_des = yaw_error * self._POSITION_PID.d * 2.0
-
-            gross_thrust_des = self._orientation.transform(F_des)[2]
-            R = self._orientation.R
-            b3_des = F_des / F_des.norm(dim=0)
-            c1_des = torch.stack([yaw_des.cos(), yaw_des.sin(), torch.zeros_like(yaw_des)], dim=0)
-            b2_des = cross(b3_des, c1_des)
-            b2_des = b2_des / b2_des.norm(dim=0)
-            b1_des = cross(b2_des, b3_des)
-            R_des = torch.stack([b1_des, b2_des, b3_des]).transpose(0, 1)
-
-            pose_err = torch.zeros_like(self._position)
-            ang_vel_err = torch.zeros_like(self._position)
-            for i in range(self.num):
-                m = 0.5 * (R_des[..., i].T @ R[..., i] - R[..., i].T @ R_des[..., i])
-                pose_err[:, i] = -torch.as_tensor([-m[1, 2], m[0, 2], -m[0, 1]], device=self.device)
-
-                ang_vel_err[:, i] = (
-                                        R_des[..., i].T @ R[..., i] @ torch.tensor([[0], [0], [yaw_spd_des[i]]], device=self.device).squeeze()
-                                        - self._angular_velocity[:, i]
-                                     )
-            body_torque_des = self._inertia @ (
-                    self._BODYRATE_PID.p @ pose_err
-                    + 1.2 * self._BODYRATE_PID.p @ ang_vel_err
-                    - self._BODYRATE_PID.d @ self._angular_acc
-                    - cross(self._angular_velocity, self._inertia @ self._angular_velocity)
-            )
-
-            thrusts_des = self._B_allocation_inv @ torch.vstack([gross_thrust_des, body_torque_des])
-            # raise NotImplementedError
+            # REC MARK: renaming for clarity & make concatenation explicit.
+            gross_thrust_and_torques = torch.cat([command[0:1, :], body_torque_des], dim=0)
+            thrusts_des = self._B_allocation_inv @ gross_thrust_and_torques
         else:
             raise ValueError("action_type should be one of ['thrust', 'bodyrate', 'velocity', 'position']")
 
@@ -631,6 +558,8 @@ class Dynamics:
         if not isinstance(command, torch.Tensor):
             return self._de_normalize(torch.from_numpy(command))
 
+        
+        # REC MARK: we choose this order [T, bx, by, bz]
         if self.action_type == ACTION_TYPE.BODYRATE:
             command = torch.hstack([
                 (command[:, :1] * self._normal_params["thrust"].half + self._normal_params["thrust"].mean) * self.m,
@@ -745,8 +674,7 @@ if __name__ == "__main__":
     env = Dynamics(
     )
     env.reset()
-    for _ in range(10):
-        action = torch.tensor([[0.0, 0.0, 0.0, 1.0]])
+    for _ in range(100):
+        action = torch.tensor([[1.0, 1.0, 1.0, 1.0]])
         state = env.step(action)
         print(state)
-        print(env.acceleration)
