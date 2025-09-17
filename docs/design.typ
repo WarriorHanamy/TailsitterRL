@@ -49,6 +49,15 @@ Normalized Control Signal are preferred.
 
 
 = State and Action
+== cardinality
+$
+  |cal(A)| = m quad |cal(S)| = n
+$
+
+$
+  State = (Pos, Attitude, Vel, BodyRateB, ...)
+$
+
 The state is defined as follows:
 $
   State = (Pos, Vel, Acc_"thr", Attitude, BodyRateB) oplus ("Aerodynamic model")

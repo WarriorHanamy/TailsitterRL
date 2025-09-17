@@ -23,6 +23,15 @@ Check which pip (Linux/macOS) or where pip (Windows) first to confirm you’re u
 pip install -e .
 ```
 
+```shell
+python -m ipykernel install --user --name=rl-notebook --display-name "rl-notebok"
+```
+
+
+# Hybrid Packages Management
+1. conda/mamba to manage the runtime depencies and compile tools.
+2. uvx to manage development tools. e.g., ruff, black, pre-commit.
+
 # ToDo Lists
 - [] quadrotor forward flight maintaining height (drag).
 - [] limit the commands bandwidth.

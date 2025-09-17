@@ -8,6 +8,21 @@ authors = [
 ]
 dependencies = [
   "numpy",
+  "matplotlib",
+  "pandas",
+  "scipy",
+  "scikit-learn",
+  "seaborn",
+  "sympy",
+  "control",
+  "gymnasium",
+  "ipykernel",
+  "notebook",
+  "jupyter",
+  "jupyter_client",
+  "jupyter_core",
+  "traitlets",
+  "ipywidgets>=8,<9",
 ]
 description = "Reinforcement Learning for Tailsitter UAVs"
 license = {text = "MIT"}
@@ -18,3 +33,9 @@ version = "0.1.0"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.uv]
+dev-dependencies = [
+  "ruff",
+  "pre-commit",
+]

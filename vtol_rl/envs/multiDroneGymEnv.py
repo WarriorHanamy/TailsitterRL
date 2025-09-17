@@ -1,32 +1,29 @@
 from stable_baselines3.common.vec_env import VecEnv
-from envs.droneEnv import DroneEnvsBase
-from typing import Union, Tuple, List, Dict, Optional
+from envs.base.droneEnv import DroneEnvsBase
+from typing import Union, List, Dict, Optional
 from gymnasium import spaces
 import numpy as np
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 import torch as th
-from utils.type import Uniform
-from utils.randomization import UniformStateRandomizer
 from habitat_sim import SensorType
 from utils.type import ACTION_TYPE
 
 
 class MultiDroneGymEnvBase(VecEnv):
     def __init__(
-            self,
-            num_agent_per_scene: int = 1,
-            num_scene: int = 1,
-            seed: int = 42,
-            visual: bool = False,
-            max_episode_steps: int = 1000,
-            device: Optional[th.device] = th.device("cpu"),
-            dynamics_kwargs=None,
-            random_kwargs=None,
-            requires_grad: bool = False,
-            scene_kwargs: Optional[Dict] = None,
-            sensor_kwargs: Optional[List] = None,
+        self,
+        num_agent_per_scene: int = 1,
+        num_scene: int = 1,
+        seed: int = 42,
+        visual: bool = False,
+        max_episode_steps: int = 1000,
+        device: Optional[th.device] = th.device("cpu"),
+        dynamics_kwargs=None,
+        random_kwargs=None,
+        requires_grad: bool = False,
+        scene_kwargs: Optional[Dict] = None,
+        sensor_kwargs: Optional[List] = None,
     ):
-
         super(VecEnv, self).__init__()
 
         self.envs = DroneEnvsBase(
@@ -58,24 +55,34 @@ class MultiDroneGymEnvBase(VecEnv):
         if not visual:
             self.observation_space = spaces.Dict(
                 {
-                    "state": spaces.Box(low=-np.inf,high=np.inf, shape=(state_size, ),dtype=np.float32)
+                    "state": spaces.Box(
+                        low=-np.inf, high=np.inf, shape=(state_size,), dtype=np.float32
+                    )
                 }
             )
         else:
             self.observation_space = spaces.Dict(
                 {
-                    "state": spaces.Box(low=-np.inf, high=np.inf, shape=(state_size,), dtype=np.float32)
+                    "state": spaces.Box(
+                        low=-np.inf, high=np.inf, shape=(state_size,), dtype=np.float32
+                    )
                 }
             )
             for sensor_setting in self.envs.sceneManager.sensor_settings:
                 if sensor_setting["sensor_type"] == SensorType.DEPTH:
                     max_depth = np.inf
                     self.observation_space.spaces[sensor_setting["uuid"]] = spaces.Box(
-                        low=0, high=max_depth, shape=[1]+sensor_setting["resolution"], dtype=np.float32
+                        low=0,
+                        high=max_depth,
+                        shape=[1] + sensor_setting["resolution"],
+                        dtype=np.float32,
                     )
                 elif sensor_setting["sensor_type"] == SensorType.COLOR:
                     self.observation_space.spaces[sensor_setting["uuid"]] = spaces.Box(
-                        low=0, high=255, shape=[3]+sensor_setting["resolution"], dtype=np.uint8
+                        low=0,
+                        high=255,
+                        shape=[3] + sensor_setting["resolution"],
+                        dtype=np.uint8,
                     )
 
         if self.envs.dynamics.action_type == ACTION_TYPE.BODYRATE:
@@ -100,7 +107,9 @@ class MultiDroneGymEnvBase(VecEnv):
         self.render_mode = ["None" for _ in range(self.num_agent)]
 
     def step(self, _action, is_test=False):
-        self._action = _action if isinstance(_action, th.Tensor) else th.as_tensor(_action)
+        self._action = (
+            _action if isinstance(_action, th.Tensor) else th.as_tensor(_action)
+        )
         # assert self._action.max() <= self.action_space.high and self._action.min() >= self.action_space.low
 
         # update state and observation and _done
@@ -113,16 +122,29 @@ class MultiDroneGymEnvBase(VecEnv):
         # update success _done
         self._success = self.get_success()
         for i in range(self.num_scene):
-            self._success[i * self.num_agent_per_scene:(i + 1) * self.num_agent_per_scene] = self._success[i * self.num_agent_per_scene:(i + 1) * self.num_agent_per_scene].all()
+            self._success[
+                i * self.num_agent_per_scene : (i + 1) * self.num_agent_per_scene
+            ] = self._success[
+                i * self.num_agent_per_scene : (i + 1) * self.num_agent_per_scene
+            ].all()
 
         # update _rewards
         self._reward = self.get_reward()
         self._rewards += self._reward
 
         # update collision, timeout _done
-        self._done = self._success | self.is_collision | (self._step_count >= self.max_episode_steps) | self.get_done()
+        self._done = (
+            self._success
+            | self.is_collision
+            | (self._step_count >= self.max_episode_steps)
+            | self.get_done()
+        )
         for i in range(self.num_scene):
-            self._done[i * self.num_agent_per_scene:(i + 1) * self.num_agent_per_scene] = self._done[i * self.num_agent_per_scene:(i + 1) * self.num_agent_per_scene].any()
+            self._done[
+                i * self.num_agent_per_scene : (i + 1) * self.num_agent_per_scene
+            ] = self._done[
+                i * self.num_agent_per_scene : (i + 1) * self.num_agent_per_scene
+            ].any()
 
         # update and record _info: eposide, timeout
         for indice in range(self.num_agent):
@@ -136,7 +158,11 @@ class MultiDroneGymEnvBase(VecEnv):
                 self._info[indice]["episode"] = {
                     "r": self._rewards[indice].cpu().clone().detach().numpy(),
                     "l": self._step_count[indice].cpu().clone().detach().numpy(),
-                    "t": (self._step_count[indice] * self.envs.dynamics.ctrl_dt).cpu().clone().detach().numpy(),
+                    "t": (self._step_count[indice] * self.envs.dynamics.ctrl_dt)
+                    .cpu()
+                    .clone()
+                    .detach()
+                    .numpy(),
                 }
                 self._info[indice]["terminal_observation"] = {
                     key: observations[key][indice] for key in observations.keys()
@@ -146,7 +172,11 @@ class MultiDroneGymEnvBase(VecEnv):
                     self._info[indice]["TimeLimit.truncated"] = True
 
         if not self.requires_grad:
-            _done, _reward, _info = self._done.cpu().clone().numpy(), self._reward.cpu().clone().numpy(), self._info.copy()
+            _done, _reward, _info = (
+                self._done.cpu().clone().numpy(),
+                self._reward.cpu().clone().numpy(),
+                self._info.copy(),
+            )
             # reset all the dead agents
             if not is_test:
                 self.check_done()
@@ -197,20 +227,17 @@ class MultiDroneGymEnvBase(VecEnv):
 
     @abstractmethod
     def get_reward(
-            self,
+        self,
     ) -> Union[np.ndarray, th.Tensor]:
         _rewards = np.empty(self.num_agent)
 
         return _rewards
 
     @abstractmethod
-    def get_observation(
-            self,
-            indice=None
-    ) -> dict:
+    def get_observation(self, indice=None) -> dict:
         observations = {
-            'depth': np.zeros([self.num_agent, 255, 255, 3], dtype=np.uint8),
-            'state': np.zeros([self.num_agent, 12], dtype=np.float32),
+            "depth": np.zeros([self.num_agent, 255, 255, 3], dtype=np.uint8),
+            "state": np.zeros([self.num_agent, 12], dtype=np.float32),
         }
         return observations
 
@@ -247,7 +274,7 @@ class MultiDroneGymEnvBase(VecEnv):
 
     @property
     def position(self):
-        return  self.envs.position
+        return self.envs.position
 
     @property
     def orientation(self):
@@ -289,10 +316,10 @@ class MultiDroneGymEnvBase(VecEnv):
         return False
 
     def step_async(self):
-        raise NotImplementedError('This method is not implemented')
+        raise NotImplementedError("This method is not implemented")
 
     def step_wait(self):
-        raise NotImplementedError('This method is not implemented')
+        raise NotImplementedError("This method is not implemented")
 
     def get_attr(self, attr_name, indices=None):
         """
@@ -312,7 +339,7 @@ class MultiDroneGymEnvBase(VecEnv):
         :param indices: (list,int) Indices of envs to assign value
         :return: (NoneType)
         """
-        raise NotImplementedError('This method is not implemented')
+        raise NotImplementedError("This method is not implemented")
 
     def env_method(self, method_name, *method_args, indices=None, **method_kwargs):
         """
@@ -323,4 +350,4 @@ class MultiDroneGymEnvBase(VecEnv):
         :param method_kwargs: (dict) Any keyword arguments to provide in the call
         :return: (list) List of items returned by the environment's method call
         """
-        raise NotImplementedError('This method is not implemented')
+        raise NotImplementedError("This method is not implemented")

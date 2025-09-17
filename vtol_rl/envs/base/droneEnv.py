@@ -1,12 +1,17 @@
 import numpy as np
 from .dynamics import Dynamics
-from vtol_rl.utils.ObjectManger import ObjectManager
+
 from vtol_rl.utils.SceneManager import SceneManager
 from typing import List, Union, Tuple, Dict, Optional
-from vtol_rl.utils.randomization import UniformStateRandomizer, NormalStateRandomizer, UnionRandomizer, load_generator, TargetUniformRandomizer
+from vtol_rl.utils.randomization import (
+    UniformStateRandomizer,
+    NormalStateRandomizer,
+    UnionRandomizer,
+    load_generator,
+)
 from vtol_rl.utils.type import Uniform, Normal
 from torch import Tensor
-from typing import Optional, Type
+from typing import Type
 import torch as th
 
 
@@ -14,23 +19,26 @@ IS_BBOX_COLLISION = True
 
 
 class DroneEnvsBase:
-    state_generator_alias = {"Uniform": UniformStateRandomizer, "Normal":NormalStateRandomizer, "Union":UnionRandomizer}
+    state_generator_alias = {
+        "Uniform": UniformStateRandomizer,
+        "Normal": NormalStateRandomizer,
+        "Union": UnionRandomizer,
+    }
 
     def __init__(
-            self,
-            num_agent_per_scene: int = 1,
-            num_scene: int = 1,
-            seed: int = 42,
-            visual: bool = True,
-            random_kwargs: Optional[Dict] = {},
-            dynamics_kwargs: Optional[Dict] = {},
-            scene_kwargs: Optional[Dict] = {},
-            sensor_kwargs: Optional[Dict] = {},
-            uav_radius: float = 0.1,
-            sensitive_radius: float = 10.,
-            multi_drone: bool = False,
-            device: Optional[Type[th.device]] = th.device("cpu"),
-
+        self,
+        num_agent_per_scene: int = 1,
+        num_scene: int = 1,
+        seed: int = 42,
+        visual: bool = True,
+        random_kwargs: Optional[Dict] = {},
+        dynamics_kwargs: Optional[Dict] = {},
+        scene_kwargs: Optional[Dict] = {},
+        sensor_kwargs: Optional[Dict] = {},
+        uav_radius: float = 0.1,
+        sensitive_radius: float = 10.0,
+        multi_drone: bool = False,
+        device: Optional[Type[th.device]] = th.device("cpu"),
     ):
         self.device = device
         self.seed = seed
@@ -50,8 +58,8 @@ class DroneEnvsBase:
             num=num_agent_per_scene * num_scene,
             seed=seed,
             device=device,
-            drag_random=random_kwargs.get("drag_random", 0.),
-            **dynamics_kwargs
+            drag_random=random_kwargs.get("drag_random", 0.0),
+            **dynamics_kwargs,
         )
         self._create_noise_model()
 
@@ -62,17 +70,21 @@ class DroneEnvsBase:
         if "obj_settings" in scene_kwargs:
             scene_kwargs["obj_settings"]["dt"] = self.dynamics.ctrl_dt
 
-        self.sceneManager: SceneManager = SceneManager(
-            num_agent_per_scene=num_agent_per_scene,
-            num_scene=num_scene,
-            seed=seed,
-            uav_radius=uav_radius,
-            multi_drone=multi_drone,
-            sensitive_radius=sensitive_radius,
-            sensor_settings=sensor_kwargs,
-            noise_settings=self.noise_settings,
-            **scene_kwargs
-        ) if visual else None
+        self.sceneManager: SceneManager = (
+            SceneManager(
+                num_agent_per_scene=num_agent_per_scene,
+                num_scene=num_scene,
+                seed=seed,
+                uav_radius=uav_radius,
+                multi_drone=multi_drone,
+                sensitive_radius=sensitive_radius,
+                sensor_settings=sensor_kwargs,
+                noise_settings=self.noise_settings,
+                **scene_kwargs,
+            )
+            if visual
+            else None
+        )
 
         # if scene_kwargs.get(["object_kwargs"], None) is not None:
         #     self.objectManager = ObjectManager(
@@ -83,78 +95,93 @@ class DroneEnvsBase:
         #         **scene_kwargs.get(["object_kwargs"])
         #     )
 
-        self.stateGenerators = self._create_randomizer(
-            random_kwargs
-        )
+        self.stateGenerators = self._create_randomizer(random_kwargs)
         self._scene_iter = random_kwargs.get("scene_iter", False)
 
         self._create_bbox()
-        self._sensor_list = [sensor["uuid"] for sensor in sensor_kwargs] if sensor_kwargs is not None else []
+        self._sensor_list = (
+            [sensor["uuid"] for sensor in sensor_kwargs]
+            if sensor_kwargs is not None
+            else []
+        )
         self._visual_sensor_list = [s for s in self._sensor_list if "IMU" not in s]
         # self.reset()
 
         self._eval = False
 
     def _create_noise_model(self):
-        self.noise_settings["IMU"] = self.noise_settings.get("IMU", {
-            "model": "UniformNoiseModel",
-            "kwargs": {
-                "mean": th.zeros((self.dynamics.state.shape[1])),
-                "half": th.zeros((self.dynamics.state.shape[1])),
-            }
-        })
+        self.noise_settings["IMU"] = self.noise_settings.get(
+            "IMU",
+            {
+                "model": "UniformNoiseModel",
+                "kwargs": {
+                    "mean": th.zeros((self.dynamics.state.shape[1])),
+                    "half": th.zeros((self.dynamics.state.shape[1])),
+                },
+            },
+        )
         if self.noise_settings["IMU"]["model"] == "UniformNoiseModel":
-            self.noise_settings["IMU"] = Uniform(**self.noise_settings["IMU"].get("kwargs", {}))
+            self.noise_settings["IMU"] = Uniform(
+                **self.noise_settings["IMU"].get("kwargs", {})
+            )
         elif self.noise_settings["IMU"]["model"] == "GaussianNoiseModel":
-            self.noise_settings["IMU"] = Normal(**self.noise_settings["IMU"].get("kwargs", {}))
+            self.noise_settings["IMU"] = Normal(
+                **self.noise_settings["IMU"].get("kwargs", {})
+            )
         else:
             raise ValueError("IMU Noise model does not exist.")
 
     def _generate_noise_obs(self, sensor):
         if sensor == "IMU":
-            state_with_noise = self.state + self.noise_settings["IMU"].generate(self.dynamics.num).to(self.device)
+            state_with_noise = self.state + self.noise_settings["IMU"].generate(
+                self.dynamics.num
+            ).to(self.device)
             # normalize the orientation
             if self.dynamics.is_quat_output:
-                normalized_ori = th.nn.functional.normalize(state_with_noise[:, 3:7], p=2, dim=1)
-                state_with_noise = th.cat([
-                    state_with_noise[:, :3],
-                    normalized_ori,
-                    state_with_noise[:, 7:]
-                ], dim=1)
+                normalized_ori = th.nn.functional.normalize(
+                    state_with_noise[:, 3:7], p=2, dim=1
+                )
+                state_with_noise = th.cat(
+                    [state_with_noise[:, :3], normalized_ori, state_with_noise[:, 7:]],
+                    dim=1,
+                )
             return state_with_noise
 
     def _create_bbox(self):
         if not self.visual:
-            bboxes = [th.tensor([[-30., -20., 0.], [30., 20., 8.]]).to(self.device)]
-        # else:
-        #     bboxes = []
-        #     if self.sceneManager.scenes[0] is None:
-        #         self.sceneManager.load_scenes()
-        #     for i in range(len(self.sceneManager.scenes)):
-        #         bound = None
-        #        # use json bound settings as priority
-        #         # use habitatsim bound then
-        #         if bound is None:
-        #             bound = self.sceneManager.scenes[i].get_active_scene_graph().get_root_node().cumulative_bb
-        #             bound = habitat_to_std(np.stack([np.array(bound.front_bottom_right), np.array(bound.back_top_left)]), None)[0].to(self.device)
-        #         bboxes.append(bound)
+            bboxes = [
+                th.tensor([[-30.0, -20.0, 0.0], [30.0, 20.0, 8.0]]).to(self.device)
+            ]
+            # else:
+            #     bboxes = []
+            #     if self.sceneManager.scenes[0] is None:
+            #         self.sceneManager.load_scenes()
+            #     for i in range(len(self.sceneManager.scenes)):
+            #         bound = None
+            #        # use json bound settings as priority
+            #         # use habitatsim bound then
+            #         if bound is None:
+            #             bound = self.sceneManager.scenes[i].get_active_scene_graph().get_root_node().cumulative_bb
+            #             bound = habitat_to_std(np.stack([np.array(bound.front_bottom_right), np.array(bound.back_top_left)]), None)[0].to(self.device)
+            #         bboxes.append(bound)
             self._bboxes = bboxes
             self._flatten_bboxes = [bbox.flatten() for bbox in bboxes]
 
     def _create_randomizer(self, random_kwargs: Dict):
-        state_random_kwargs = random_kwargs.get("state_generator",
-                                                {
-                                                    "class": "Uniform",
-                                                    "kwargs": [
-                                                        {"position": {"mean": [0., 0., 1.], "half": [0., 0., 0.0]}},
-                                                    ]
-                                                }
-                                                )
+        state_random_kwargs = random_kwargs.get(
+            "state_generator",
+            {
+                "class": "Uniform",
+                "kwargs": [
+                    {"position": {"mean": [0.0, 0.0, 1.0], "half": [0.0, 0.0, 0.0]}},
+                ],
+            },
+        )
         state_generator_class = state_random_kwargs.get("class", "Uniform")
         # if isinstance(state_generator_class, str):
         #     state_generator_class = self.state_generator_alias.get(state_generator_class, None)
 
-        stateGenerators,generator_kwargs = [],[]
+        stateGenerators, generator_kwargs = [], []
         kwargs_list = state_random_kwargs.get("kwargs", [{}])
         generator_kwargs = kwargs_list
         # if issubclass(state_generator_class, UniformStateRandomizer):
@@ -187,30 +214,32 @@ class DroneEnvsBase:
                         device=self.device,
                         is_collision_func=self.sceneManager.get_point_is_collision,
                         scene_id=i,
-                        kwargs=generator_kwargs[0]
+                        kwargs=generator_kwargs[0],
                     )
                     for j in range(self.sceneManager.num_agent_per_scene):
                         stateGenerators.append(generator)
             elif len(generator_kwargs) == self.sceneManager.num_scene:
                 for i in range(self.sceneManager.num_scene):
                     for j in range(len(generator_kwargs)):
-                        stateGenerators.append(load_generator(
-                            cls=state_generator_class,
-                            device=self.device,
-                            is_collision_func=self.sceneManager.get_point_is_collision,
-                            scene_id=i,
-                            kwargs=generator_kwargs[j]
-                        )
+                        stateGenerators.append(
+                            load_generator(
+                                cls=state_generator_class,
+                                device=self.device,
+                                is_collision_func=self.sceneManager.get_point_is_collision,
+                                scene_id=i,
+                                kwargs=generator_kwargs[j],
+                            )
                         )
             elif len(generator_kwargs) == self.sceneManager.num_agent:
                 for i in range(self.sceneManager.num_agent):
-                    stateGenerators.append(load_generator(
-                        cls=state_generator_class,
-                        device=self.device,
-                        is_collision_func=self.sceneManager.get_point_is_collision,
-                        scene_id=i // self.sceneManager.num_agent_per_scene,
-                        kwargs=generator_kwargs[i]
-                    )
+                    stateGenerators.append(
+                        load_generator(
+                            cls=state_generator_class,
+                            device=self.device,
+                            is_collision_func=self.sceneManager.get_point_is_collision,
+                            scene_id=i // self.sceneManager.num_agent_per_scene,
+                            kwargs=generator_kwargs[i],
+                        )
                     )
 
             else:
@@ -225,11 +254,12 @@ class DroneEnvsBase:
         else:
             # not visual
             for agent_id in range(self.dynamics.num):
-                stateGenerators.append(load_generator(
-                    cls=state_random_kwargs.get("class", "Uniform"),
-                    device=self.device,
-                    kwargs=generator_kwargs[0],
-                )
+                stateGenerators.append(
+                    load_generator(
+                        cls=state_random_kwargs.get("class", "Uniform"),
+                        device=self.device,
+                        kwargs=generator_kwargs[0],
+                    )
                 )
             # assert len(stateGenerators) == 1
 
@@ -237,17 +267,28 @@ class DroneEnvsBase:
 
     def _generate_state(self, indices: Optional[List[int]] = None) -> Tuple[Tensor]:
         indices = np.arange(self.dynamics.num) if indices is None else indices
-        indices = th.as_tensor([indices], device=self.device) if not hasattr(indices, "__iter__") else indices
-        positions, orientations, velocities, angular_velocities = \
-            th.empty((len(indices), 3), device=self.device), th.empty((len(indices), 4), device=self.device), \
-                th.empty((len(indices), 3), device=self.device), th.empty((len(indices), 3), device=self.device)
+        indices = (
+            th.as_tensor([indices], device=self.device)
+            if not hasattr(indices, "__iter__")
+            else indices
+        )
+        positions, orientations, velocities, angular_velocities = (
+            th.empty((len(indices), 3), device=self.device),
+            th.empty((len(indices), 4), device=self.device),
+            th.empty((len(indices), 3), device=self.device),
+            th.empty((len(indices), 3), device=self.device),
+        )
         for data_id, index in enumerate(indices):
-            positions[data_id], orientations[data_id], velocities[data_id], angular_velocities[data_id] = \
-                self.stateGenerators[index].safe_generate(
-                    num=1,
-                    position=self.dynamic_object_position[index][0],
-                    velocity=self.dynamic_object_velocity[index][0]
-                )
+            (
+                positions[data_id],
+                orientations[data_id],
+                velocities[data_id],
+                angular_velocities[data_id],
+            ) = self.stateGenerators[index].safe_generate(
+                num=1,
+                position=self.dynamic_object_position[index][0],
+                velocity=self.dynamic_object_velocity[index][0],
+            )
 
         return positions, orientations, velocities, angular_velocities
 
@@ -258,34 +299,63 @@ class DroneEnvsBase:
         self.reset_agents(indices=None, state=state)
         return self.state, self.sensor_obs
 
-    def reset_agents(self, indices: Optional[List] = None, state=None) -> Tuple[Tensor, Optional[np.ndarray]]:
-        indices = indices if (indices is None or hasattr(indices, "__iter__")) else th.as_tensor([indices], device=self.device)
+    def reset_agents(
+        self, indices: Optional[List] = None, state=None
+    ) -> Tuple[Tensor, Optional[np.ndarray]]:
+        indices = (
+            indices
+            if (indices is None or hasattr(indices, "__iter__"))
+            else th.as_tensor([indices], device=self.device)
+        )
         motor_speed, thrust, t = None, None, None
         if state is not None:
             if isinstance(state, th.Tensor):
                 state = state.to(self.device)
-                pos, ori, vel, ori_vel, motor_speed, thrust, t = \
-                    state[:,:3].clone().detach(), state[:,3:7].clone().detach(), state[:,7:10].clone().detach(),\
-                        state[:,10:13].clone().detach(), state[:,13:17].clone().detach(), state[:,17:21].clone().detach(), state[:,21].clone().detach()
+                pos, ori, vel, ori_vel, motor_speed, thrust, t = (
+                    state[:, :3].clone().detach(),
+                    state[:, 3:7].clone().detach(),
+                    state[:, 7:10].clone().detach(),
+                    state[:, 10:13].clone().detach(),
+                    state[:, 13:17].clone().detach(),
+                    state[:, 17:21].clone().detach(),
+                    state[:, 21].clone().detach(),
+                )
                 # state[:, :3], state[:, 3:7], state[:, 7:10], state[:, 10:13], state[:, 13:17], state[:, 17:21]
             else:
                 if len(state) == 4:
                     pos, ori, vel, ori_vel = state
                 elif len(state) == 6:
-                    pos, ori ,vel, ori_vel, motor_speed, thrust = state
+                    pos, ori, vel, ori_vel, motor_speed, thrust = state
                 else:
                     raise ValueError("State should be a tuple of 4 or 6 elements.")
         else:
             pos, ori, vel, ori_vel = self._generate_state(indices)
-        self.dynamics.reset(pos=pos, ori=ori, vel=vel, ori_vel=ori_vel, motor_omega=motor_speed, thrusts=thrust, t=t, indices=indices)
+        self.dynamics.reset(
+            pos=pos,
+            ori=ori,
+            vel=vel,
+            ori_vel=ori_vel,
+            motor_omega=motor_speed,
+            thrusts=thrust,
+            t=t,
+            indices=indices,
+        )
         if self.visual:
-            self.sceneManager.reset_agents(std_positions=pos, std_orientations=ori, indices=indices)
+            self.sceneManager.reset_agents(
+                std_positions=pos, std_orientations=ori, indices=indices
+            )
         self.update_observation(indices=indices)
         self.update_collision(indices)
 
     def reset_scenes(self, indices: Optional[List[int]] = None):
-        agent_indices = ((th.tile(th.arange(self.sceneManager.num_agent_per_scene), (len(indices), 1))
-                    + (indices.unsqueeze(1) * self.sceneManager.num_agent_per_scene)).reshape(-1,1)).flatten()
+        agent_indices = (
+            (
+                th.tile(
+                    th.arange(self.sceneManager.num_agent_per_scene), (len(indices), 1)
+                )
+                + (indices.unsqueeze(1) * self.sceneManager.num_agent_per_scene)
+            ).reshape(-1, 1)
+        ).flatten()
         self.reset_agents(agent_indices)
         self.sceneManager.reset_scenes(indices)
 
@@ -296,16 +366,41 @@ class DroneEnvsBase:
                 # training channel sequence
                 for sensor_uuid in self._visual_sensor_list:
                     if "depth" in sensor_uuid:
-                        self._sensor_obs[sensor_uuid] = \
-                            np.expand_dims(np.stack([each_agent_obs[sensor_uuid] for each_agent_obs in img_obs]), 1)
+                        self._sensor_obs[sensor_uuid] = np.expand_dims(
+                            np.stack(
+                                [
+                                    each_agent_obs[sensor_uuid]
+                                    for each_agent_obs in img_obs
+                                ]
+                            ),
+                            1,
+                        )
                         # self._sensor_obs[sensor_uuid][:, :, :, :][self._sensor_obs[sensor_uuid][index, :, :, :] == 0] = 100
-                        self._sensor_obs[sensor_uuid] = np.where(self._sensor_obs[sensor_uuid]==0, 20, self._sensor_obs[sensor_uuid])
+                        self._sensor_obs[sensor_uuid] = np.where(
+                            self._sensor_obs[sensor_uuid] == 0,
+                            20,
+                            self._sensor_obs[sensor_uuid],
+                        )
                     elif "color" in sensor_uuid:
-                        self._sensor_obs[sensor_uuid] = \
-                            np.transpose(np.stack([each_agent_obs[sensor_uuid] for each_agent_obs in img_obs])[..., :3], (0, 3, 1, 2))
+                        self._sensor_obs[sensor_uuid] = np.transpose(
+                            np.stack(
+                                [
+                                    each_agent_obs[sensor_uuid]
+                                    for each_agent_obs in img_obs
+                                ]
+                            )[..., :3],
+                            (0, 3, 1, 2),
+                        )
                     elif "semantic" in sensor_uuid:
-                        self._sensor_obs[sensor_uuid] = \
-                            np.expand_dims(np.stack([each_agent_obs[sensor_uuid] for each_agent_obs in img_obs]),1)
+                        self._sensor_obs[sensor_uuid] = np.expand_dims(
+                            np.stack(
+                                [
+                                    each_agent_obs[sensor_uuid]
+                                    for each_agent_obs in img_obs
+                                ]
+                            ),
+                            1,
+                        )
                     else:
                         raise KeyError("Can not find uuid of sensors")
             else:
@@ -313,16 +408,23 @@ class DroneEnvsBase:
                 for each_agent_obs, index in zip(img_obs, indices):
                     for sensor_uuid in self._visual_sensor_list:
                         if "depth" in sensor_uuid:
-                            self._sensor_obs[sensor_uuid][index, :, :, :] = \
+                            self._sensor_obs[sensor_uuid][index, :, :, :] = (
                                 np.expand_dims(each_agent_obs[sensor_uuid], 0)
+                            )
                             # set background (value==0) to 20
-                            self._sensor_obs[sensor_uuid][index, :, :, :][self._sensor_obs[sensor_uuid][index, :, :, :] == 0] = 20
+                            self._sensor_obs[sensor_uuid][index, :, :, :][
+                                self._sensor_obs[sensor_uuid][index, :, :, :] == 0
+                            ] = 20
                         elif "color" in sensor_uuid:
-                            self._sensor_obs[sensor_uuid][index, :, :, :] = \
-                                np.transpose(each_agent_obs[sensor_uuid][..., :3], (2, 0, 1))
+                            self._sensor_obs[sensor_uuid][index, :, :, :] = (
+                                np.transpose(
+                                    each_agent_obs[sensor_uuid][..., :3], (2, 0, 1)
+                                )
+                            )
                         elif "semantic" in sensor_uuid:
-                            self._sensor_obs[sensor_uuid][index, :, :, :] = \
+                            self._sensor_obs[sensor_uuid][index, :, :, :] = (
                                 each_agent_obs[sensor_uuid]
+                            )
                         else:
                             raise KeyError("Can not find uuid of sensors")
 
@@ -331,40 +433,61 @@ class DroneEnvsBase:
     def update_collision(self, indices: Optional[List[int]] = None):
         if self.visual:
             if indices is None:
-                self._collision_point = self.sceneManager.get_collision_point().to(self.device)
+                self._collision_point = self.sceneManager.get_collision_point().to(
+                    self.device
+                )
             # indices are not None
             else:
-                self._collision_point[indices] = self.sceneManager.get_collision_point(indices=indices).to(self.device)
+                self._collision_point[indices] = self.sceneManager.get_collision_point(
+                    indices=indices
+                ).to(self.device)
             self._is_out_bounds = self.sceneManager.is_out_bounds.to(self.device)
 
         # not visual
         else:
             if indices is None:
-                value, index = th.hstack([
-                    self.dynamics.position.clone().detach() - self._bboxes[0][0],
-                    self._bboxes[0][1] - self.dynamics.position.clone().detach()]
+                value, index = th.hstack(
+                    [
+                        self.dynamics.position.clone().detach() - self._bboxes[0][0],
+                        self._bboxes[0][1] - self.dynamics.position.clone().detach(),
+                    ]
                 ).min(dim=1)
                 self._collision_point = self.dynamics.position.clone().detach()
-                self._collision_point[th.arange(self.dynamics.num),index%3] = self._flatten_bboxes[0][index]
+                self._collision_point[th.arange(self.dynamics.num), index % 3] = (
+                    self._flatten_bboxes[0][index]
+                )
             else:
-                value, index = th.hstack([
-                    self.dynamics.position[indices].clone().detach() - self._bboxes[0][0],
-                    self._bboxes[0][1] - self.dynamics.position[indices].clone().detach()]
+                value, index = th.hstack(
+                    [
+                        self.dynamics.position[indices].clone().detach()
+                        - self._bboxes[0][0],
+                        self._bboxes[0][1]
+                        - self.dynamics.position[indices].clone().detach(),
+                    ]
                 ).min(dim=1)
-                self._collision_point[indices] = self.dynamics.position[indices].clone().detach()
-                self._collision_point[indices,index%3] = self._flatten_bboxes[0][index]
+                self._collision_point[indices] = (
+                    self.dynamics.position[indices].clone().detach()
+                )
+                self._collision_point[indices, index % 3] = self._flatten_bboxes[0][
+                    index
+                ]
 
-            self._is_out_bounds = (self.dynamics.position < self._bboxes[0][0]).any(dim=1) |\
-                                  (self.dynamics.position > self._bboxes[0][1]).any(dim=1)
+            self._is_out_bounds = (self.dynamics.position < self._bboxes[0][0]).any(
+                dim=1
+            ) | (self.dynamics.position > self._bboxes[0][1]).any(dim=1)
 
-        self._collision_vector = (self._collision_point - self.position)
+        self._collision_vector = self._collision_point - self.position
         self._collision_dis = (self._collision_vector - 0).norm(dim=1)
-        self._is_collision = (self._collision_dis < self.uav_radius) | self._is_out_bounds
+        self._is_collision = (
+            self._collision_dis < self.uav_radius
+        ) | self._is_out_bounds
 
     def step(self, action):
         self.dynamics.step(action)
         if self.visual:
-            self.sceneManager.set_pose(self.dynamics.position, self.dynamics._orientation.toTensor().T)
+            self.sceneManager.set_pose(
+                self.dynamics.position, self.dynamics._orientation.toTensor().T
+            )
             self.sceneManager.step()
         self.update_observation()
         self.update_collision()
@@ -380,7 +503,7 @@ class DroneEnvsBase:
             self.position.clone().detach(),
             self.orientation.clone().detach(),
             self.velocity.clone().detach(),
-            self.angular_velocity.clone().detach()
+            self.angular_velocity.clone().detach(),
         )
 
     def recover(self):

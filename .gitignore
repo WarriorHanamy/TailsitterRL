@@ -1,5 +1,5 @@
 VisFly/
-
+aerial_gym_simulator/
 
 
 # python project
@@ -147,6 +147,16 @@ venv.bak/
 *~
 
 
-__pycache__/ 
-*.py[cod] 
+__pycache__/
+*.py[cod]
 *$py.class
+
+
+
+# tensorboards
+runs/
+
+
+# tests/
+tests/
+utils/
