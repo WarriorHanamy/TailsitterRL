@@ -108,13 +108,13 @@ class Dynamics:
         self._inertia = torch.diag(self._inertia)
 
         self._inertia_inv = torch.inverse(self._inertia)
+
+        # MotorOmegas as actuator commands, Bu -> actual forces/torques
+        # B_inv to find desired actuator commands from desired forces/torques
         self._B_allocation = torch.vstack(
             [torch.ones(1, 4), t_BM_[:2], self._kappa * torch.tensor([1, -1, 1, -1])]
         )
         self._B_allocation_inv = torch.inverse(self._B_allocation)
-
-        print(f"B allocation\n: {self._B_allocation}")
-        print(f"B allocation inv\n: {self._B_allocation_inv}")
 
         self._position = torch.zeros((3, self.num), device=self.device)
         self._orientation = Quaternion(num=self.num, device=self.device)

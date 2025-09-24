@@ -113,9 +113,6 @@ class Dynamics:
         )
         self._B_allocation_inv = torch.inverse(self._B_allocation)
 
-        print(f"B allocation\n: {self._B_allocation}")
-        print(f"B allocation inv\n: {self._B_allocation_inv}")
-
         self._position = torch.zeros((3, self.num), device=self.device)
         self._orientation = Quaternion(num=self.num, device=self.device)
         self._velocity = torch.zeros((3, self.num), device=self.device)

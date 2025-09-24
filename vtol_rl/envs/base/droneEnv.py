@@ -30,7 +30,7 @@ class DroneEnvsBase:
         num_agent_per_scene: int = 1,
         num_scene: int = 1,
         seed: int = 42,
-        visual: bool = True,
+        visual: bool = False,
         random_kwargs: Optional[Dict] = {},
         dynamics_kwargs: Optional[Dict] = {},
         scene_kwargs: Optional[Dict] = {},

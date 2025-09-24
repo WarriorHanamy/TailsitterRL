@@ -1,44 +1,44 @@
-import os
-import sys
-
-import numpy as np
 from .base.droneGymEnv import DroneGymEnvsBase
-from typing import Union, Tuple, List, Optional, Dict
-import torch as th
+from typing import Optional, Dict
+import torch
 from habitat_sim import SensorType
-from gymnasium import spaces
-from vtol_rl.utils.tools.train_encoder import model as encoder
 from vtol_rl.utils.type import TensorDict
 
 
 class HoverEnv(DroneGymEnvsBase):
     def __init__(
-            self,
-            num_agent_per_scene: int = 1,
-            num_scene: int = 1,
-            seed: int = 42,
-            visual: bool = True,
-            requires_grad: bool = False,
-            random_kwargs: dict = None,
-            dynamics_kwargs: dict = {},
-            scene_kwargs: dict = {},
-            sensor_kwargs: list = [],
-            device: str = "cpu",
-            target: Optional[th.Tensor] = None,
-            max_episode_steps: int = 256,
-            tensor_output: bool = False,
+        self,
+        num_agent_per_scene: int = 1,
+        num_scene: int = 1,
+        seed: int = 42,
+        visual: bool = True,
+        requires_grad: bool = False,
+        random_kwargs: dict = None,
+        dynamics_kwargs: dict = {},
+        scene_kwargs: dict = {},
+        sensor_kwargs: list = [],
+        device: str = "cpu",
+        target: Optional[torch.Tensor] = None,
+        max_episode_steps: int = 256,
+        tensor_output: bool = False,
     ):
-
-        random_kwargs = {
-            "state_generator":
-                {
+        random_kwargs = (
+            {
+                "state_generator": {
                     "class": "Uniform",
                     "kwargs": [
-                        # {"position": {"mean": [1., 0., 1.5], "half": [0.0, 0.0, 0.0]}},
-                        {"position": {"mean": [1., 0., 1.5], "half": [1.0, 1.0, 0.5]}},
-                    ]
+                        {
+                            "position": {
+                                "mean": [1.0, 0.0, 1.5],
+                                "half": [1.0, 1.0, 0.5],
+                            }
+                        },
+                    ],
                 }
-        } if random_kwargs is None else random_kwargs
+            }
+            if random_kwargs is None
+            else random_kwargs
+        )
 
         super().__init__(
             num_agent_per_scene=num_agent_per_scene,
@@ -53,69 +53,65 @@ class HoverEnv(DroneGymEnvsBase):
             device=device,
             max_episode_steps=max_episode_steps,
             tensor_output=tensor_output,
-
         )
 
-        self.target = th.ones((self.num_envs, 1)) @ th.as_tensor([1, 0., 1.5] if target is None else target).reshape(1,-1)
+        self.target = torch.ones((self.num_envs, 1)) @ torch.as_tensor(
+            [1, 0.0, 1.5] if target is None else target
+        ).reshape(1, -1)
         self.success_radius = 0.5
 
-    def get_observation(
-            self,
-            indices=None
-    ) -> Dict:
-        obs = TensorDict({
-            "state": self.state,
-        })
-
-        # if self.latent is not None:
-        #     if not self.requires_grad:
-        #         obs["latent"] = self.latent.cpu().numpy()
-        #     else:
-        #         obs["latent"] = self.latent
+    def get_observation(self, indices=None) -> Dict:
+        obs = TensorDict(
+            {
+                "state": self.state,
+            }
+        )
 
         return obs
 
-    def get_success(self) -> th.Tensor:
-        return th.full((self.num_agent,), False)
-        # return (self.position - self.target).norm(dim=1) < self.success_radius
+    def get_success(self) -> torch.Tensor:
+        return torch.full((self.num_agent,), False)
 
-    def get_reward(self) -> th.Tensor:
+    def get_reward(self) -> torch.Tensor:
         base_r = 0.1
-        pos_factor = -0.1 * 1/9
+        pos_factor = -0.1 * 1 / 9
         reward = (
-                base_r +
-                 (self.position - self.target).norm(dim=1) * pos_factor +
-                 (self.orientation - th.tensor([1, 0, 0, 0])).norm(dim=1) * -0.00001 +
-                 (self.velocity - 0).norm(dim=1) * -0.002 +
-                 (self.angular_velocity - 0).norm(dim=1) * -0.002
+            base_r
+            + (self.position - self.target).norm(dim=1)
+            * pos_factor  # minimize position error
+            + (self.orientation - torch.tensor([1, 0, 0, 0])).norm(dim=1)
+            * -0.00001  # minimize orientation error
+            + (self.velocity - 0).norm(dim=1) * -0.002  # minimize velocity
+            + (self.angular_velocity - 0).norm(dim=1)
+            * -0.002  # minimize angular velocity
         )
-
         return reward
 
 
 class HoverEnv2(HoverEnv):
-
     def __init__(
-            self,
-            num_agent_per_scene: int = 1,
-            num_scene: int = 1,
-            seed: int = 42,
-            visual: bool = True,
-            requires_grad: bool = False,
-            random_kwargs: dict = {},
-            dynamics_kwargs: dict = {},
-            scene_kwargs: dict = {},
-            sensor_kwargs: list = [],
-            device: str = "cpu",
-            target: Optional[th.Tensor] = None,
-            max_episode_steps: int = 256,
-            tensor_output: bool = False,
+        self,
+        num_agent_per_scene: int = 1,
+        num_scene: int = 1,
+        seed: int = 42,
+        visual: bool = True,
+        requires_grad: bool = False,
+        random_kwargs: dict = {},
+        dynamics_kwargs: dict = {},
+        scene_kwargs: dict = {},
+        sensor_kwargs: list = [],
+        device: str = "cpu",
+        target: Optional[torch.Tensor] = None,
+        max_episode_steps: int = 256,
+        tensor_output: bool = False,
     ):
-        sensor_kwargs = [{
-            "sensor_type": SensorType.DEPTH,
-            "uuid": "depth",
-            "resolution": [64, 64],
-        }]
+        sensor_kwargs = [
+            {
+                "sensor_type": SensorType.DEPTH,
+                "uuid": "depth",
+                "resolution": [64, 64],
+            }
+        ]
         super().__init__(
             num_agent_per_scene=num_agent_per_scene,
             num_scene=num_scene,
@@ -132,24 +128,25 @@ class HoverEnv2(HoverEnv):
             tensor_output=tensor_output,
         )
 
-    def get_observation(
-            self,
-            indices=None
-    ) -> Dict:
-        dis_scale = (self.target - self.position).norm(dim=1, keepdim=True).detach().clamp_min(self.max_sense_radius)
-        state = th.hstack([
-            (self.target - self.position) / 10,
-            self.orientation,
-            self.velocity / 10,
-            self.angular_velocity / 10,
-        ]).to(self.device)
+    def get_observation(self, indices=None) -> Dict:
+        # dis_scale = (
+        #     (self.target - self.position)
+        #     .norm(dim=1, keepdim=True)
+        #     .detach()
+        #     .clamp_min(self.max_sense_radius)
+        # )
+        state = torch.hstack(
+            [
+                (self.target - self.position) / 10,  # error.
+                self.orientation,  # if hovering , target orientation is [1,0,0,0]
+                self.velocity / 10,  # target vel is 0
+                self.angular_velocity / 10,  # target ang vel is 0
+            ]
+        ).to(self.device)
 
-        return TensorDict({
-            "state": state,
-            # "depth": th.as_tensor(self.sensor_obs["depth"]/10).clamp(max=1)
-        })
-
-
-
-
-
+        return TensorDict(
+            {
+                "state": state,
+                # "depth": torch.as_tensor(self.sensor_obs["depth"]/10).clamp(max=1)
+            }
+        )

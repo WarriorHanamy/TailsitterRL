@@ -23,6 +23,8 @@ dependencies = [
   "jupyter_core",
   "traitlets",
   "ipywidgets>=8,<9",
+  "torch",
+  "stable_baselines3>=2.3.0",
 ]
 description = "Reinforcement Learning for Tailsitter UAVs"
 license = {text = "MIT"}
