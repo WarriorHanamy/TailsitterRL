@@ -41,3 +41,9 @@ dev-dependencies = [
   "ruff",
   "pre-commit",
 ]
+
+[tool.pytest.ini_options]
+python_classes = "Test*"
+python_files = "test_*.py"
+python_functions = "test_*"
+testpaths = ["vtol_rl/tests"]

@@ -143,6 +143,7 @@ class TailsitterEnvsBase(VecEnv):
             self._action.abs().max() <= 1.0
         ), f"The action should be in range [-1, 1], but got {self._action}"
         # update state and observation and _done
+        TailsitterEnvsBase.logger.debug(f"step action.shape: {_action.shape}")
         self.envs.step(self._action)
         self.get_full_observation()
         if latent_func is not None:

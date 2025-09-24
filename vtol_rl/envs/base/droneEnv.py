@@ -484,11 +484,11 @@ class DroneEnvsBase:
 
     def step(self, action):
         self.dynamics.step(action)
-        if self.visual:
-            self.sceneManager.set_pose(
-                self.dynamics.position, self.dynamics._orientation.toTensor().T
-            )
-            self.sceneManager.step()
+        # if self.visual:
+        #     self.sceneManager.set_pose(
+        #         self.dynamics.position, self.dynamics._orientation.toTensor().T
+        #     )
+        #     self.sceneManager.step()
         self.update_observation()
         self.update_collision()
 

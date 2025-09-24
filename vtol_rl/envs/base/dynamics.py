@@ -416,7 +416,10 @@ class Dynamics:
             thrusts_des = command
         # REC MARK: I remove position and velocity control for simplicity
         elif self.action_type == ACTION_TYPE.BODYRATE:
-            assert command.shape == (4, 1)
+            assert command.shape == (
+                4,
+                1,
+            ), f"command shape should be (4, 1), but got {command.shape}"
             angular_velocity_error = command[1:, :] - self._angular_velocity
             # self._ctrl_i += (self._BODYRATE_PID.i @ (angular_velocity_error * self.sim_time_step))
             # self._ctrl_i = self._ctrl_i.clip(min=-3, max=3)
