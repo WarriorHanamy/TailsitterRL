@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-import torch as th
+import torch
 from typing import Dict, Union, Any
 from enum import Enum
 import numpy as np
@@ -17,56 +17,62 @@ class ACTION_TYPE(Enum):
     VELOCITY = 2
     POSITION = 3
 
-action_type_alias: Dict = {"thrust": ACTION_TYPE.THRUST, "bodyrate": ACTION_TYPE.BODYRATE, "velocity": ACTION_TYPE.VELOCITY, "position": ACTION_TYPE.POSITION}
 
-
+action_type_alias: Dict = {
+    "thrust": ACTION_TYPE.THRUST,
+    "bodyrate": ACTION_TYPE.BODYRATE,
+    "velocity": ACTION_TYPE.VELOCITY,
+    "position": ACTION_TYPE.POSITION,
+}
 
 
 class Uniform:
-    mean: Union[float, th.Tensor] = 0
-    half: Union[float, th.Tensor] = 0
+    mean: Union[float, torch.Tensor] = 0
+    radius: Union[float, torch.Tensor] = 1
 
     def __init__(
-            self,
-            mean,
-            half, ):
-        self.mean = th.atleast_1d(th.as_tensor(mean))
-        self.half = th.atleast_1d(th.as_tensor(half))
+        self,
+        mean,
+        radius,
+    ):
+        self.mean = torch.atleast_1d(torch.as_tensor(mean))
+        self.radius = torch.atleast_1d(torch.as_tensor(radius))
 
     def to(self, device):
         self.mean = self.mean.to(device)
-        self.half = self.half.to(device)
+        self.radius = self.radius.to(device)
         return self
 
-    def generate(self, size):
-        return (th.rand(size, len(self.mean)) - 0.5) * self.half + self.mean
+    def sample(self, size):
+        return (torch.rand(size, len(self.mean)) - 0.5) * 2 * self.radius + self.mean
 
 
 class Normal:
-    mean: Union[float, th.Tensor] = 0
-    std: Union[float, th.Tensor] = 0
+    mean: Union[float, torch.Tensor] = 0
+    std: Union[float, torch.Tensor] = 0
 
     def __init__(
-            self,
-            mean,
-            std, ):
-        self.mean = th.as_tensor(mean)
-        self.std = th.as_tensor(std)
+        self,
+        mean,
+        std,
+    ):
+        self.mean = torch.as_tensor(mean)
+        self.std = torch.as_tensor(std)
 
     def to(self, device):
         self.mean = self.mean.to(device)
         self.std = self.std.to(device)
         return self
 
-    def generate(self, size):
-        return th.normal(self.mean, self.std, size)
+    def sample(self, size):
+        return torch.normal(self.mean, self.std, size)
 
 
 @dataclass
 class PID:
-    p: th.Tensor = th.diag(th.tensor([1, 1, 1]))
-    i: th.Tensor = th.diag(th.tensor([1, 1, 1]))
-    d: th.Tensor = th.diag(th.tensor([1, 1, 1]))
+    p: torch.Tensor = torch.diag(torch.tensor([1, 1, 1]))
+    i: torch.Tensor = torch.diag(torch.tensor([1, 1, 1]))
+    d: torch.Tensor = torch.diag(torch.tensor([1, 1, 1]))
 
     def to(self, device):
         self.p = self.p.to(device)
@@ -120,19 +126,19 @@ class TensorDict(dict):
         if isinstance(key, str):
             return super().__getitem__(key)
         elif isinstance(key, int):
-            return TensorDict({k: th.atleast_2d(v[key]) for k, v in self.items()})
+            return TensorDict({k: torch.atleast_2d(v[key]) for k, v in self.items()})
         elif hasattr(key, "__iter__"):
             # Convert key to CPU if it's a tensor to avoid device mismatch
-            if hasattr(key, 'cpu'):
+            if hasattr(key, "cpu"):
                 key = key.cpu()
-            return TensorDict({k: th.atleast_2d(v[key]) for k, v in self.items()})
+            return TensorDict({k: torch.atleast_2d(v[key]) for k, v in self.items()})
         else:
             raise TypeError("Invalid key type. Must be either str or int.")
 
     def __setitem__(self, key: Any, value: Any) -> None:
         if isinstance(key, str):
             super().__setitem__(key, value)
-        elif isinstance(key, (int, th.Tensor, np.ndarray, list)):
+        elif isinstance(key, (int, torch.Tensor, np.ndarray, list)):
             for k in self.keys():
                 self[k][key] = value[k]
         else:
@@ -141,17 +147,17 @@ class TensorDict(dict):
     def append(self, data):
         if isinstance(data, TensorDict):
             for key, value in data.items():
-                self[key] = th.cat([self[key], data[key]])
+                self[key] = torch.cat([self[key], data[key]])
 
     def cpu(self):
         for key, value in self.items():
             self[key] = self[key].cpu()
         return self
 
-    def as_tensor(self, device=th.device("cpu")):
+    def as_tensor(self, device=torch.device("cpu")):
         d = TensorDict({})
         for key, value in self.items():
-            d[key] = th.as_tensor(value, device=device)
+            d[key] = torch.as_tensor(value, device=device)
 
         return d
 
@@ -174,8 +180,8 @@ class TensorDict(dict):
             cache = []
             for x in x_list:
                 cache.append(x[key])
-            r[key] = th.stack(cache)
-            # r[key] = th.reshape(r[key], (-1, *r[key].shape[2:]))
+            r[key] = torch.stack(cache)
+            # r[key] = torch.reshape(r[key], (-1, *r[key].shape[2:]))
         return r
 
     def numpy(self):
@@ -186,7 +192,7 @@ class TensorDict(dict):
     def __len__(self):
         lens = [len(value) for value in self.values()]
         # assert all lens equal
-        assert all([l == lens[0] for l in lens])
+        assert all([len_ == lens[0] for len_ in lens])
         return lens[0]
 
     def __iter__(self):

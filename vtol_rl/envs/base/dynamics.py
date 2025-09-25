@@ -92,12 +92,7 @@ class Dynamics:
         # 1(CCW) ... 0(CW)
         motor_direction = torch.tensor(
             [
-                [
-                    1,
-                    -1,
-                    -1,
-                    1,
-                ],
+                [1, -1, -1, 1],
                 [-1, -1, 1, 1],
                 [0, 0, 0, 0.0],
             ]
@@ -324,9 +319,9 @@ class Dynamics:
             normalized = torch.hstack(
                 [
                     (action[:, :1] / self.m - self._normal_params["thrust"].mean)
-                    / self._normal_params["thrust"].half,
+                    / self._normal_params["thrust"].radius,
                     (action[:, 1:] - self._normal_params["bodyrate"].mean)
-                    / self._normal_params["bodyrate"].half,
+                    / self._normal_params["bodyrate"].radius,
                 ]
             )
             return normalized
@@ -416,10 +411,12 @@ class Dynamics:
             thrusts_des = command
         # REC MARK: I remove position and velocity control for simplicity
         elif self.action_type == ACTION_TYPE.BODYRATE:
-            assert command.shape == (
-                4,
-                1,
-            ), f"command shape should be (4, 1), but got {command.shape}"
+            # REC MARK: to understand the batch operations.
+            # assert command.shape == (
+            #     4,
+            #     1,
+            # ), f"command shape should be (4, 1), but got {command.shape}"
+            command = command.squeeze(0)  # (4, N)
             angular_velocity_error = command[1:, :] - self._angular_velocity
             # self._ctrl_i += (self._BODYRATE_PID.i @ (angular_velocity_error * self.sim_time_step))
             # self._ctrl_i = self._ctrl_i.clip(min=-3, max=3)
@@ -581,8 +578,8 @@ class Dynamics:
             max_bias = 1
             if thrust_normalize_method == "medium":
                 # (_, average_)
-                thrust_scale = (self.m * -Dynamics.g[2]) / self.m
-                thrust_bias = (self.m * -Dynamics.g[2]) * max_bias / self.m
+                thrust_scale = -0.5 * Dynamics.g[2]  # [min is 0.5g, max is 1.5g]
+                thrust_bias = -max_bias * Dynamics.g[2]
             elif thrust_normalize_method == "max_min":
                 # (min_act, max_act)->(min_thrust, max_thrust) this method try to reach the limit of drone, which is negative for sim2real
                 thrust_scale = (
@@ -598,43 +595,19 @@ class Dynamics:
                     "thrust_normalize_method should be one of ['medium', 'max_min']"
                 )
 
-            bodyrate_scale = (self._bd_rate.max - self._bd_rate.min) / (
-                normal_range[1] - normal_range[0]
+            bodyrate_scale = (
+                0.5
+                * (self._bd_rate.max - self._bd_rate.min)
+                / (normal_range[1] - normal_range[0])
             )
             bodyrate_bias = self._bd_rate.max - bodyrate_scale * normal_range[1]
             self._normal_params = {
-                "thrust": Uniform(mean=thrust_bias, half=thrust_scale).to(self.device),
-                "bodyrate": Uniform(mean=bodyrate_bias, half=bodyrate_scale).to(
+                "thrust": Uniform(mean=thrust_bias, radius=thrust_scale).to(
                     self.device
                 ),
-            }
-
-        elif self.action_type == ACTION_TYPE.VELOCITY:
-            spd_scale = (self._bd_spd.max - self._bd_spd.min) / (
-                normal_range[1] - normal_range[0]
-            )
-            spd_bias = self._bd_spd.max - spd_scale * normal_range[1]
-            yaw_scale = torch.as_tensor(torch.pi - (-torch.pi)) / (
-                normal_range[1] - normal_range[0]
-            )
-            yaw_bias = torch.pi - yaw_scale * normal_range[1]
-            self._normal_params = {
-                "velocity": Uniform(mean=spd_bias, half=spd_scale).to(self.device),
-                "yaw": Uniform(mean=yaw_bias, half=yaw_bias).to(self.device),
-            }
-
-        elif self.action_type.POSITION:
-            pos_scale = (self._bd_pos.max - self._bd_pos.min) / (
-                normal_range[1] - normal_range[0]
-            )
-            pos_bias = self._bd_pos.max - pos_scale * normal_range[1]
-            yaw_scale = torch.as_tensor(torch.pi - (-torch.pi)) / (
-                normal_range[1] - normal_range[0]
-            )
-            yaw_bias = torch.pi - yaw_scale * normal_range[1]
-            self._normal_params = {
-                "velocity": Uniform(mean=pos_bias, half=pos_scale).to(self.device),
-                "yaw": Uniform(mean=yaw_bias, half=yaw_scale).to(self.device),
+                "bodyrate": Uniform(mean=bodyrate_bias, radius=bodyrate_scale).to(
+                    self.device
+                ),
             }
 
         else:
@@ -656,52 +629,21 @@ class Dynamics:
 
         # REC MARK: we choose this order [T, bx, by, bz]
         if self.action_type == ACTION_TYPE.BODYRATE:
+            print(f"command before denormalize: {command}")
+            print(f"shape of command: {command.shape}")
+            print(f"command[:, :1]: {command[:, :1]}")
             command = torch.hstack(
                 [
                     (
-                        command[:, :1] * self._normal_params["thrust"].half
+                        command[:, :1] * self._normal_params["thrust"].radius
                         + self._normal_params["thrust"].mean
                     )
                     * self.m,
-                    command[:, 1:] * self._normal_params["bodyrate"].half
+                    command[:, 1:] * self._normal_params["bodyrate"].radius
                     + self._normal_params["bodyrate"].mean,
                 ]
             )
             return command.T
-
-        elif self.action_type == ACTION_TYPE.THRUST:
-            command = (
-                self.m
-                * (
-                    command * self._normal_params["thrust"].half
-                    + self._normal_params["thrust"].mean
-                ).T
-            )
-            return command
-
-        elif self.action_type == ACTION_TYPE.VELOCITY:
-            command = torch.hstack(
-                [
-                    command[:, :1] * self._normal_params["yaw"].half
-                    + self._normal_params["yaw"].mean,
-                    command[:, 1:] * self._normal_params["velocity"].half
-                    + self._normal_params["velocity"].mean,
-                ]
-            )
-            return command
-
-        elif self.action_type == ACTION_TYPE.POSITION:
-            # Now position commands contain [yaw, x, y, z] with direct yaw control
-            command = torch.hstack(
-                [
-                    command[:, :1] * self._normal_params["yaw"].half
-                    + self._normal_params["yaw"].mean,  # yaw angle
-                    command[:, 1:] * self._normal_params["velocity"].half
-                    + self._normal_params["velocity"].mean,  # position x,y,z
-                ]
-            )
-            return command
-
         else:
             raise ValueError(
                 "action_type should be one of ['thrust', 'bodyrate', 'velocity', 'position']"

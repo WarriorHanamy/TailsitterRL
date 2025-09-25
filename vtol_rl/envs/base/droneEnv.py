@@ -1,7 +1,6 @@
 import numpy as np
 from .dynamics import Dynamics
 
-from vtol_rl.utils.SceneManager import SceneManager
 from typing import List, Union, Tuple, Dict, Optional
 from vtol_rl.utils.randomization import (
     UniformStateRandomizer,
@@ -70,30 +69,8 @@ class DroneEnvsBase:
         if "obj_settings" in scene_kwargs:
             scene_kwargs["obj_settings"]["dt"] = self.dynamics.ctrl_dt
 
-        self.sceneManager: SceneManager = (
-            SceneManager(
-                num_agent_per_scene=num_agent_per_scene,
-                num_scene=num_scene,
-                seed=seed,
-                uav_radius=uav_radius,
-                multi_drone=multi_drone,
-                sensitive_radius=sensitive_radius,
-                sensor_settings=sensor_kwargs,
-                noise_settings=self.noise_settings,
-                **scene_kwargs,
-            )
-            if visual
-            else None
-        )
-
-        # if scene_kwargs.get(["object_kwargs"], None) is not None:
-        #     self.objectManager = ObjectManager(
-        #         num_scene=num_scene,
-        #         num_agent_per_scene=num_agent_per_scene,
-        #         dt=dynamics_kwargs.get("dt", 0.02),
-        #         object_scene_handle=self.sceneManager.object_list if self.sceneManager is not None else None,
-        #         **scene_kwargs.get(["object_kwargs"])
-        #     )
+        # REC MARK: kept for avoiding error, but not used
+        self.sceneManager = None
 
         self.stateGenerators = self._create_randomizer(random_kwargs)
         self._scene_iter = random_kwargs.get("scene_iter", False)
@@ -116,7 +93,7 @@ class DroneEnvsBase:
                 "model": "UniformNoiseModel",
                 "kwargs": {
                     "mean": th.zeros((self.dynamics.state.shape[1])),
-                    "half": th.zeros((self.dynamics.state.shape[1])),
+                    "radius": th.zeros((self.dynamics.state.shape[1])),
                 },
             },
         )
@@ -152,18 +129,6 @@ class DroneEnvsBase:
             bboxes = [
                 th.tensor([[-30.0, -20.0, 0.0], [30.0, 20.0, 8.0]]).to(self.device)
             ]
-            # else:
-            #     bboxes = []
-            #     if self.sceneManager.scenes[0] is None:
-            #         self.sceneManager.load_scenes()
-            #     for i in range(len(self.sceneManager.scenes)):
-            #         bound = None
-            #        # use json bound settings as priority
-            #         # use habitatsim bound then
-            #         if bound is None:
-            #             bound = self.sceneManager.scenes[i].get_active_scene_graph().get_root_node().cumulative_bb
-            #             bound = habitat_to_std(np.stack([np.array(bound.front_bottom_right), np.array(bound.back_top_left)]), None)[0].to(self.device)
-            #         bboxes.append(bound)
             self._bboxes = bboxes
             self._flatten_bboxes = [bbox.flatten() for bbox in bboxes]
 
@@ -173,11 +138,11 @@ class DroneEnvsBase:
             {
                 "class": "Uniform",
                 "kwargs": [
-                    {"position": {"mean": [0.0, 0.0, 1.0], "half": [0.0, 0.0, 0.0]}},
+                    {"position": {"mean": [0.0, 0.0, 1.0], "radius": [0.0, 0.0, 0.0]}},
                 ],
             },
         )
-        state_generator_class = state_random_kwargs.get("class", "Uniform")
+        # state_generator_class = state_random_kwargs.get("class", "Uniform")
         # if isinstance(state_generator_class, str):
         #     state_generator_class = self.state_generator_alias.get(state_generator_class, None)
 
@@ -204,53 +169,8 @@ class DroneEnvsBase:
         #     pass
         # else:
         #     raise ValueError("State generator class is not available.")
-
         if self.visual:
-            stateGenerators = []
-            if len(generator_kwargs) == 1:
-                for i in range(self.sceneManager.num_scene):
-                    generator = load_generator(
-                        cls=state_generator_class,
-                        device=self.device,
-                        is_collision_func=self.sceneManager.get_point_is_collision,
-                        scene_id=i,
-                        kwargs=generator_kwargs[0],
-                    )
-                    for j in range(self.sceneManager.num_agent_per_scene):
-                        stateGenerators.append(generator)
-            elif len(generator_kwargs) == self.sceneManager.num_scene:
-                for i in range(self.sceneManager.num_scene):
-                    for j in range(len(generator_kwargs)):
-                        stateGenerators.append(
-                            load_generator(
-                                cls=state_generator_class,
-                                device=self.device,
-                                is_collision_func=self.sceneManager.get_point_is_collision,
-                                scene_id=i,
-                                kwargs=generator_kwargs[j],
-                            )
-                        )
-            elif len(generator_kwargs) == self.sceneManager.num_agent:
-                for i in range(self.sceneManager.num_agent):
-                    stateGenerators.append(
-                        load_generator(
-                            cls=state_generator_class,
-                            device=self.device,
-                            is_collision_func=self.sceneManager.get_point_is_collision,
-                            scene_id=i // self.sceneManager.num_agent_per_scene,
-                            kwargs=generator_kwargs[i],
-                        )
-                    )
-
-            else:
-                raise ValueError("Len of State kwargs is not available.")
-
-            assert len(stateGenerators) == self.sceneManager.num_agent
-
-            for state_generator in stateGenerators:
-                state_generator.to(self.device)
-                # state_generator.set_seed(self.seed)
-
+            pass
         else:
             # not visual
             for agent_id in range(self.dynamics.num):
@@ -484,11 +404,6 @@ class DroneEnvsBase:
 
     def step(self, action):
         self.dynamics.step(action)
-        # if self.visual:
-        #     self.sceneManager.set_pose(
-        #         self.dynamics.position, self.dynamics._orientation.toTensor().T
-        #     )
-        #     self.sceneManager.step()
         self.update_observation()
         self.update_collision()
 

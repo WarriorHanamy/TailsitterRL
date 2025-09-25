@@ -19,6 +19,7 @@ class HoverEnv(TailsitterEnvsBase):
         scene_kwargs: dict = {},
         sensor_kwargs: list = [],
         device: str = "cpu",
+        visual: bool = False,
         target: Optional[torch.Tensor] = None,
         max_episode_steps: int = 256,
         tensor_output: bool = False,

@@ -24,7 +24,7 @@ dependencies = [
   "traitlets",
   "ipywidgets>=8,<9",
   "torch",
-  "stable_baselines3>=2.3.0",
+  "stable-baselines3[extra]",
 ]
 description = "Reinforcement Learning for Tailsitter UAVs"
 license = {text = "MIT"}
@@ -40,9 +40,13 @@ where = ["."]
 dev-dependencies = [
   "ruff",
   "pre-commit",
+  "pytest>=7.0",
 ]
 
 [tool.pytest.ini_options]
+filterwarnings = [
+  "ignore:The use of `x.T` on tensors of dimension other than 2:UserWarning",
+]
 python_classes = "Test*"
 python_files = "test_*.py"
 python_functions = "test_*"

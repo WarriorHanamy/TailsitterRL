@@ -135,6 +135,17 @@ class TailsitterEnvsBase(VecEnv):
         self._is_initial = False
 
     def step(self, _action, is_test=False, latent_func=None):
+        """
+        Args:
+            _action: (torch.Tensor) shape (num_envs, action_dim)
+            is_test: (bool) whether the env is in test mode.
+            latent_func: (callable) function to update latent variables.
+        Returns:
+            observation: (dict or TensorDict) shape (num_envs, obs_dim)
+            reward: (torch.Tensor) shape (num_envs,)
+            done: (torch.Tensor) shape (num_envs,)
+            info: (list) length num_envs
+        """
         assert self._is_initial, "You should call reset() before step()"
         self._action = (
             _action if isinstance(_action, torch.Tensor) else torch.as_tensor(_action)
@@ -143,7 +154,7 @@ class TailsitterEnvsBase(VecEnv):
             self._action.abs().max() <= 1.0
         ), f"The action should be in range [-1, 1], but got {self._action}"
         # update state and observation and _done
-        TailsitterEnvsBase.logger.debug(f"step action.shape: {_action.shape}")
+        print(f"high-level call to step action.shape: {_action.shape}")
         self.envs.step(self._action)
         self.get_full_observation()
         if latent_func is not None:
@@ -248,7 +259,7 @@ class TailsitterEnvsBase(VecEnv):
         _info["episode"] = {
             "r": self._rewards[indice].cpu().clone().detach().numpy(),
             "l": step_count_val,
-            "t": (self._step_count[indice] * self.envs.dynamics.ctrl_dt)
+            "t": (self._step_count[indice] * self.envs.dynamics.ctrl_period)
             .cpu()
             .clone()
             .detach()
