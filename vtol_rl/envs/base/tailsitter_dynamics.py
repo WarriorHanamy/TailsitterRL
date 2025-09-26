@@ -74,7 +74,7 @@ class Dynamics:
         self.cfg = cfg
         self.set_seed(seed)
         self._init()
-        self._get_scale_factor(action_space)
+        self._get_scale_factor()
         self._set_device(device)
 
         self._init_thrust_mag = -(self.m * Dynamics.g / 4)[-1]

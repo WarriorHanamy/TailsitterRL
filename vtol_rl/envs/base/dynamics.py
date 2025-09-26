@@ -1,14 +1,11 @@
-from typing import Union, List, Tuple, Optional
-
 import torch
-from vtol_rl.utils.maths import Quaternion, Integrator
-from vtol_rl.utils.type import ACTION_TYPE, action_type_alias, bound, Uniform, PID
+
 from vtol_rl import config
+from vtol_rl.utils.maths import Integrator, Quaternion
+from vtol_rl.utils.type import ACTION_TYPE, PID, Uniform, action_type_alias, bound
 
 
 # These will be moved to the correct device in _set_device method
-
-
 class Dynamics:
     g = torch.tensor([[0, 0, -9.81]]).T
     z = torch.tensor([[0, 0, 1]]).T
@@ -23,7 +20,7 @@ class Dynamics:
         ctrl_period: float = 0.03,
         ctrl_delay: bool = True,
         comm_delay: float = 0.06,
-        action_space: Tuple[float, float] = (-1, 1),
+        action_space: tuple[float, float] = (-1, 1),
         device: torch.device = torch.device("cpu"),
         integrator: str = "euler",
         drag_random: float = 0,
@@ -74,7 +71,7 @@ class Dynamics:
         self.cfg = cfg
         self.set_seed(seed)
         self._init()
-        self._get_scale_factor(action_space)
+        self._get_scale_factor()
         self._set_device(device)
 
         self._init_thrust_mag = -(self.m * Dynamics.g / 4)[-1]
@@ -163,14 +160,14 @@ class Dynamics:
 
     def reset(
         self,
-        pos: Union[List, torch.Tensor, None] = None,
-        ori: Union[List, torch.Tensor, None] = None,
-        vel: Union[List, torch.Tensor, None] = None,
-        ori_vel: Union[List, torch.Tensor, None] = None,
-        motor_omega: Union[List, torch.Tensor, None] = None,
-        thrusts: Union[List, torch.Tensor, None] = None,
-        t: Union[List, torch.Tensor, None] = None,
-        indices: Optional[List] = None,
+        pos: list | torch.Tensor | None = None,
+        ori: list | torch.Tensor | None = None,
+        vel: list | torch.Tensor | None = None,
+        ori_vel: list | torch.Tensor | None = None,
+        motor_omega: list | torch.Tensor | None = None,
+        thrusts: list | torch.Tensor | None = None,
+        t: list | torch.Tensor | None = None,
+        indices: list | None = None,
     ):
         if indices is None:
             self._position = (
@@ -318,17 +315,17 @@ class Dynamics:
             # action format: [thrust/m, bodyrate_x, bodyrate_y, bodyrate_z]
             normalized = torch.hstack(
                 [
-                    (action[:, :1] / self.m - self._normal_params["thrust"].mean)
-                    / self._normal_params["thrust"].radius,
-                    (action[:, 1:] - self._normal_params["bodyrate"].mean)
-                    / self._normal_params["bodyrate"].radius,
+                    (action[:, :1] / self.m - self._normals["thrust"].mean)
+                    / self._normals["thrust"].radius,
+                    (action[:, 1:] - self._normals["bodyrate"].mean)
+                    / self._normals["bodyrate"].radius,
                 ]
             )
             return normalized
         else:
             raise ValueError(f"Unsupported action_type: {self.action_type}")
 
-    def step(self, action) -> Tuple[torch.Tensor, torch.Tensor]:
+    def step(self, action) -> tuple[torch.Tensor, torch.Tensor]:
         # Add real imu delay
         if self._comm_delay_steps:
             self._pre_action.append(action.T.clone())
@@ -566,48 +563,32 @@ class Dynamics:
             max=torch.tensor(data["max_pos"]), min=torch.tensor(-data["max_pos"])
         )
 
-    def _get_scale_factor(self, normal_range: Tuple[float, float] = (-1, 1)):
+    def _get_scale_factor(self):
         """_summary_
             get the transformation parameters for the command
         Args:
-            normal_range (Tuple[float, float], optional): _description_. Defaults to (-1, 1).
+            normal_range (-1, 1).
         """
         thrust_normalize_method = "medium"  # "max_min"
-
         if self.action_type == ACTION_TYPE.BODYRATE:
             max_bias = 1
             if thrust_normalize_method == "medium":
-                # (_, average_)
-                thrust_scale = -0.5 * Dynamics.g[2]  # [min is 0.5g, max is 1.5g]
-                thrust_bias = -max_bias * Dynamics.g[2]
+                thrust_normalizer = Uniform(
+                    mean=-max_bias * Dynamics.g[2], radius=-0.5 * Dynamics.g[2]
+                ).to(self.device)
             elif thrust_normalize_method == "max_min":
-                # (min_act, max_act)->(min_thrust, max_thrust) this method try to reach the limit of drone, which is negative for sim2real
-                thrust_scale = (
-                    (self._bd_thrust.max - self._bd_thrust.min)
-                    / self.m
-                    / (normal_range[1] - normal_range[0])
-                )
-                thrust_bias = (
-                    self._bd_thrust.max / self.m - thrust_scale * normal_range[1]
-                )
+                thrust_normalizer = Uniform.from_min_max(
+                    self._bd_thrust.min / self.m, self._bd_thrust.max / self.m
+                ).to(self.device)
             else:
                 raise ValueError(
                     "thrust_normalize_method should be one of ['medium', 'max_min']"
                 )
-
-            bodyrate_scale = (
-                0.5
-                * (self._bd_rate.max - self._bd_rate.min)
-                / (normal_range[1] - normal_range[0])
-            )
-            bodyrate_bias = self._bd_rate.max - bodyrate_scale * normal_range[1]
-            self._normal_params = {
-                "thrust": Uniform(mean=thrust_bias, radius=thrust_scale).to(
-                    self.device
-                ),
-                "bodyrate": Uniform(mean=bodyrate_bias, radius=bodyrate_scale).to(
-                    self.device
-                ),
+            self._normals = {
+                "thrust": thrust_normalizer,
+                "bodyrate": Uniform.from_min_max(
+                    self._bd_rate.min, self._bd_rate.max
+                ).to(self.device),
             }
 
         else:
@@ -634,13 +615,14 @@ class Dynamics:
             print(f"command[:, :1]: {command[:, :1]}")
             command = torch.hstack(
                 [
+                    # TODO: denormalize
                     (
-                        command[:, :1] * self._normal_params["thrust"].radius
-                        + self._normal_params["thrust"].mean
+                        command[:, :1] * self._normals["thrust"].radius
+                        + self._normals["thrust"].mean
                     )
                     * self.m,
-                    command[:, 1:] * self._normal_params["bodyrate"].radius
-                    + self._normal_params["bodyrate"].mean,
+                    command[:, 1:] * self._normals["bodyrate"].radius
+                    + self._normals["bodyrate"].mean,
                 ]
             )
             return command.T
