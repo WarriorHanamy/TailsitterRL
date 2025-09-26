@@ -117,17 +117,34 @@ class Uniform:
         # return (x_normed + 1) / 2 * (self.max - self.min) + self.min
 
 
-class Normal:
-    mean: float | torch.Tensor = 0
-    std: float | torch.Tensor = 0
-
+class Gaussian:
     def __init__(
         self,
-        mean,
-        std,
+        mean: float | torch.Tensor | list | np.ndarray,
+        std: float | torch.Tensor | list | np.ndarray,
     ):
-        self.mean = torch.as_tensor(mean)
-        self.std = torch.as_tensor(std)
+        """
+        Args:
+            mean: center of the gaussian distribution
+                Type: torch.Tensor finally, shape (n,). If input is float, list, or np.ndarray, it will be converted to torch.Tensor.
+            std: standard deviation of the gaussian distribution
+                Type: torch.Tensor finally, shape (n,). If input is float, list, or np.ndarray, it will be converted to torch.Tensor.
+        """
+        self.mean = torch.as_tensor(mean).view(1, -1)
+        self.std = torch.as_tensor(std).view(1, -1)
+
+    @classmethod
+    def from_min_max(cls, min_val, max_val):
+        """
+        Create Normal distribution from min/max values by assuming:
+        - mean is midpoint between min and max
+        - 99.7% of values fall within min/max (3 standard deviations each side)
+        """
+        min_val = torch.as_tensor(min_val)
+        max_val = torch.as_tensor(max_val)
+        mean = (min_val + max_val) / 2
+        std = (max_val - min_val) / 6  # 3 std deviations each side
+        return cls(mean, std)
 
     def to(self, device):
         self.mean = self.mean.to(device)
@@ -135,7 +152,32 @@ class Normal:
         return self
 
     def sample(self, size):
-        return torch.normal(self.mean, self.std, size)
+        """Sample from normal distribution"""
+        return torch.randn(size, len(self.mean)) * self.std + self.mean
+
+    def per_sample_normalize(self, x_orig: torch.Tensor):
+        """
+        Normalize the input to approximately standard gaussian (mean=0, std=1)
+
+        Args:
+            x_orig (torch.Tensor): input tensor in original range
+                Shape: (batch_size, feats_size)
+        Returns:
+            normed_x (torch.Tensor): normalized tensor with ~Gaussian(0, 1)
+        """
+        return (x_orig - self.mean) / self.std
+
+    def per_sample_denormalize(self, x_normed: torch.Tensor):
+        """
+        Denormalize the input from standard normal back to original distribution
+
+        Args:
+            x_normed (torch.Tensor): input tensor in normalized range ~Gaussian(0, 1)
+                Shape: (batch_size, feats_size)
+        Returns:
+            x_orig (torch.Tensor): denormalized tensor in original range
+        """
+        return x_normed * self.std + self.mean
 
 
 @dataclass

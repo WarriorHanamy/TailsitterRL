@@ -571,10 +571,9 @@ class Dynamics:
         """
         thrust_normalize_method = "medium"  # "max_min"
         if self.action_type == ACTION_TYPE.BODYRATE:
-            max_bias = 1
             if thrust_normalize_method == "medium":
                 thrust_normalizer = Uniform(
-                    mean=-max_bias * Dynamics.g[2], radius=-0.5 * Dynamics.g[2]
+                    mean=-Dynamics.g[2], radius=-0.5 * Dynamics.g[2]
                 ).to(self.device)
             elif thrust_normalize_method == "max_min":
                 thrust_normalizer = Uniform.from_min_max(
@@ -600,8 +599,9 @@ class Dynamics:
         """_summary_
             de-normalize the command to the real value
         Args:
-            command (_type_): _description_
-
+            command torch.Tensor: shape (N, 4)
+                1. with normed values in range [-1, 1]
+                2. with the semantic order of [thrust/m, bodyrate_x, bodyrate_y, bodyrate_z]
         Returns:
             _type_: _description_
         """
@@ -609,27 +609,16 @@ class Dynamics:
             return self._de_normalize(torch.from_numpy(command))
 
         # REC MARK: we choose this order [T, bx, by, bz]
+        # REC MARK: Assume commands are in shape (N, 4)
         if self.action_type == ACTION_TYPE.BODYRATE:
-            print(f"command before denormalize: {command}")
-            print(f"shape of command: {command.shape}")
-            print(f"command[:, :1]: {command[:, :1]}")
             command = torch.hstack(
                 [
-                    # TODO: denormalize
-                    (
-                        command[:, :1] * self._normals["thrust"].radius
-                        + self._normals["thrust"].mean
-                    )
-                    * self.m,
-                    command[:, 1:] * self._normals["bodyrate"].radius
-                    + self._normals["bodyrate"].mean,
+                    self._normals["thrust"].per_sample_denormalize(command[:, :1]),
+                    self._normals["bodyrate"].per_sample_denormalize(command[:, 1:]),
                 ]
             )
-            return command.T
         else:
-            raise ValueError(
-                "action_type should be one of ['thrust', 'bodyrate', 'velocity', 'position']"
-            )
+            raise ValueError("action_type should be one of ['bodyrate']")
 
     @property
     def position(self):

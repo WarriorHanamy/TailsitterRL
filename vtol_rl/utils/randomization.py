@@ -1,5 +1,5 @@
 import torch
-from .type import Uniform, Normal
+from .type import Uniform, Gaussian
 from typing import Optional
 from .maths import Quaternion
 from abc import abstractmethod
@@ -110,30 +110,20 @@ class UniformStateRandomizer(StateRandomizer):
             device=device,
         )
 
-        self.position = Uniform(**position)
-        self.orientation = Uniform(**orientation)
-        self.velocity = Uniform(**velocity)
-        self.angular_velocity = Uniform(**angular_velocity)
+        self.position_randomizer = Uniform(**position).to(self.device)
+        self.orientation_randomizer = Uniform(**orientation).to(self.device)
+        self.velocity_randomizer = Uniform(**velocity).to(self.device)
+        self.angular_velocity_randomizer = Uniform(**angular_velocity).to(self.device)
 
-    def generate(self, num, **kwargs) -> tuple:
-        position = (
-            2 * torch.rand(num, *self.position.mean.shape) - 1
-        ) * self.position.radius.unsqueeze(0) + self.position.mean.unsqueeze(0)
-        orientation = (
-            2 * torch.rand(num, *self.position.mean.shape) - 1
-        ) * self.orientation.radius.unsqueeze(0) + self.orientation.mean.unsqueeze(0)
-        velocity = (
-            2 * torch.rand(num, *self.position.mean.shape) - 1
-        ) * self.velocity.radius.unsqueeze(0) + self.velocity.mean.unsqueeze(0)
-        angular_velocity = (
-            2 * torch.rand(num, *self.position.mean.shape) - 1
-        ) * self.angular_velocity.radius.unsqueeze(
-            0
-        ) + self.angular_velocity.mean.unsqueeze(0)
+    def generate(self, num) -> tuple:
+        position = self.position_randomizer.sample(num).to(self.device)
+        orientation = self.orientation_randomizer.sample(num).to(self.device)
+        velocity = self.velocity_randomizer.sample(num).to(self.device)
+        angular_velocity = self.angular_velocity_randomizer.sample(num).to(self.device)
         return position, orientation, velocity, angular_velocity
 
 
-class NormalStateRandomizer(StateRandomizer):
+class GaussianStateRandomizer(StateRandomizer):
     def __init__(
         self,
         position={"mean": [0.0, 0.0, 0.0], "std": [0.0, 0.0, 0.0]},
@@ -156,23 +146,16 @@ class NormalStateRandomizer(StateRandomizer):
             device=device,
         )
 
-        self.position = Normal(**position)
+        self.position_randomizer = Gaussian(**position).to(self.device)
+        self.orientation_randomizer = Gaussian(**orientation).to(self.device)
+        self.velocity_randomizer = Gaussian(**velocity).to(self.device)
+        self.angular_velocity_randomizer = Gaussian(**angular_velocity).to(self.device)
 
-    def _generate(self, num, **kwargs) -> tuple:
-        position = (
-            2 * torch.randn(num, *self.position.mean.shape) - 1
-        ) * self.position.std.unsqueeze(0) + self.position.mean.unsqueeze(0)
-        orientation = (
-            2 * torch.randn(num, *self.position.mean.shape) - 1
-        ) * self.orientation.std.unsqueeze(0) + self.orientation.mean.unsqueeze(0)
-        velocity = (
-            2 * torch.randn(num, *self.position.mean.shape) - 1
-        ) * self.velocity.std.unsqueeze(0) + self.velocity.mean.unsqueeze(0)
-        angular_velocity = (
-            2 * torch.randn(num, *self.position.mean.shape) - 1
-        ) * self.angular_velocity.std.unsqueeze(
-            0
-        ) + self.angular_velocity.mean.unsqueeze(0)
+    def generate(self, num) -> tuple:
+        position = self.position_randomizer.sample(num).to(self.device)
+        orientation = self.orientation_randomizer.sample(num).to(self.device)
+        velocity = self.velocity_randomizer.sample(num).to(self.device)
+        angular_velocity = self.angular_velocity_randomizer.sample(num).to(self.device)
         return position, orientation, velocity, angular_velocity
 
 
@@ -254,7 +237,7 @@ class TargetUniformRandomizer(UniformStateRandomizer):
 class UnionRandomizer:
     Randomizer_alias = {
         "Uniform": UniformStateRandomizer,
-        "Normal": NormalStateRandomizer,
+        "Normal": GaussianStateRandomizer,
     }
 
     def __init__(
@@ -346,15 +329,15 @@ def load_generator(
     )
 
 
-def load_dist(data):
-    cls_alias = {
-        "Uniform": Uniform,
-        "Normal": Normal,
-    }
-    if not isinstance(data, dict):
-        kwargs = {"mean": data, "half": 0.0}
-        cls = Uniform
-    else:
-        cls = cls_alias[data["class"]]
-        kwargs = data["kwargs"]
-    return cls(**kwargs)
+# def load_dist(data):
+#     cls_alias = {
+#         "Uniform": Uniform,
+#         "Normal": Gaussian,
+#     }
+#     if not isinstance(data, dict):
+#         kwargs = {"mean": data, "half": 0.0}
+#         cls = Uniform
+#     else:
+#         cls = cls_alias[data["class"]]
+#         kwargs = data["kwargs"]
+#     return cls(**kwargs)

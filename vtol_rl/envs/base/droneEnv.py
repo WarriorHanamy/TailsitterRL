@@ -1,12 +1,11 @@
 import numpy as np
-import torch as th
-from torch import Tensor
+import torch
 
 from vtol_rl.utils.randomization import (
     UniformStateRandomizer,
     load_generator,
 )
-from vtol_rl.utils.type import Normal, Uniform
+from vtol_rl.utils.type import Gaussian
 
 from .dynamics import Dynamics
 
@@ -27,7 +26,7 @@ class DroneEnvsBase:
         uav_radius: float = 0.1,
         sensitive_radius: float = 10.0,
         multi_drone: bool = False,
-        device: type[th.device] | None = th.device("cpu"),
+        device: type[torch.device] | None = torch.device("cpu"),
     ):
         self.device = device
         self.seed = seed
@@ -77,26 +76,19 @@ class DroneEnvsBase:
         self._eval = False
 
     def _create_noise_model(self):
-        self.noise_settings["IMU"] = self.noise_settings.get(
-            "IMU",
-            {
-                "model": "UniformNoiseModel",
-                "kwargs": {
-                    "mean": th.zeros(self.dynamics.state.shape[1]),
-                    "radius": th.zeros(self.dynamics.state.shape[1]),
-                },
-            },
+        self.noise_settings["IMU"] = Gaussian(
+            mean=torch.zeros(6).to(self.device),
+            std=torch.tensor(
+                [
+                    0.002,  # acc x
+                    0.002,  # acc y
+                    0.002,  # acc z
+                    0.001,  # gyro x
+                    0.001,  # gyro y
+                    0.001,  # gyro z
+                ]
+            ).to(self.device),
         )
-        if self.noise_settings["IMU"]["model"] == "UniformNoiseModel":
-            self.noise_settings["IMU"] = Uniform(
-                **self.noise_settings["IMU"].get("kwargs", {})
-            )
-        elif self.noise_settings["IMU"]["model"] == "GaussianNoiseModel":
-            self.noise_settings["IMU"] = Normal(
-                **self.noise_settings["IMU"].get("kwargs", {})
-            )
-        else:
-            raise ValueError("IMU Noise model does not exist.")
 
     def _generate_noise_obs(self, sensor):
         if sensor == "IMU":
@@ -105,10 +97,10 @@ class DroneEnvsBase:
             ).to(self.device)
             # normalize the orientation
             if self.dynamics.is_quat_output:
-                normalized_ori = th.nn.functional.normalize(
+                normalized_ori = torch.nn.functional.normalize(
                     state_with_noise[:, 3:7], p=2, dim=1
                 )
-                state_with_noise = th.cat(
+                state_with_noise = torch.cat(
                     [state_with_noise[:, :3], normalized_ori, state_with_noise[:, 7:]],
                     dim=1,
                 )
@@ -117,7 +109,7 @@ class DroneEnvsBase:
     def _create_bbox(self):
         if not self.visual:
             bboxes = [
-                th.tensor([[-30.0, -20.0, 0.0], [30.0, 20.0, 8.0]]).to(self.device)
+                torch.tensor([[-30.0, -20.0, 0.0], [30.0, 20.0, 8.0]]).to(self.device)
             ]
             self._bboxes = bboxes
             self._flatten_bboxes = [bbox.flatten() for bbox in bboxes]
@@ -147,18 +139,18 @@ class DroneEnvsBase:
                 )
         return stateGenerators
 
-    def _generate_state(self, indices: list[int] | None = None) -> tuple[Tensor]:
+    def _generate_state(self, indices: list[int] | None = None) -> tuple[torch.Tensor]:
         indices = np.arange(self.dynamics.num) if indices is None else indices
         indices = (
-            th.as_tensor([indices], device=self.device)
+            torch.as_tensor([indices], device=self.device)
             if not hasattr(indices, "__iter__")
             else indices
         )
         positions, orientations, velocities, angular_velocities = (
-            th.empty((len(indices), 3), device=self.device),
-            th.empty((len(indices), 4), device=self.device),
-            th.empty((len(indices), 3), device=self.device),
-            th.empty((len(indices), 3), device=self.device),
+            torch.empty((len(indices), 3), device=self.device),
+            torch.empty((len(indices), 4), device=self.device),
+            torch.empty((len(indices), 3), device=self.device),
+            torch.empty((len(indices), 3), device=self.device),
         )
         for data_id, index in enumerate(indices):
             (
@@ -174,7 +166,7 @@ class DroneEnvsBase:
 
         return positions, orientations, velocities, angular_velocities
 
-    def reset(self, state=None) -> tuple[Tensor, np.ndarray | None]:
+    def reset(self, state=None) -> tuple[torch.Tensor, np.ndarray | None]:
         if self.visual:
             if self._scene_iter or self.sceneManager.scenes[0] is None:
                 self.sceneManager.load_scenes()
@@ -183,15 +175,15 @@ class DroneEnvsBase:
 
     def reset_agents(
         self, indices: list | None = None, state=None
-    ) -> tuple[Tensor, np.ndarray | None]:
+    ) -> tuple[torch.Tensor, np.ndarray | None]:
         indices = (
             indices
             if (indices is None or hasattr(indices, "__iter__"))
-            else th.as_tensor([indices], device=self.device)
+            else torch.as_tensor([indices], device=self.device)
         )
         motor_speed, thrust, t = None, None, None
         if state is not None:
-            if isinstance(state, th.Tensor):
+            if isinstance(state, torch.Tensor):
                 state = state.to(self.device)
                 pos, ori, vel, ori_vel, motor_speed, thrust, t = (
                     state[:, :3].clone().detach(),
@@ -232,8 +224,9 @@ class DroneEnvsBase:
     def reset_scenes(self, indices: list[int] | None = None):
         agent_indices = (
             (
-                th.tile(
-                    th.arange(self.sceneManager.num_agent_per_scene), (len(indices), 1)
+                torch.tile(
+                    torch.arange(self.sceneManager.num_agent_per_scene),
+                    (len(indices), 1),
                 )
                 + (indices.unsqueeze(1) * self.sceneManager.num_agent_per_scene)
             ).reshape(-1, 1)
@@ -328,18 +321,18 @@ class DroneEnvsBase:
         # not visual
         else:
             if indices is None:
-                value, index = th.hstack(
+                value, index = torch.hstack(
                     [
                         self.dynamics.position.clone().detach() - self._bboxes[0][0],
                         self._bboxes[0][1] - self.dynamics.position.clone().detach(),
                     ]
                 ).min(dim=1)
                 self._collision_point = self.dynamics.position.clone().detach()
-                self._collision_point[th.arange(self.dynamics.num), index % 3] = (
+                self._collision_point[torch.arange(self.dynamics.num), index % 3] = (
                     self._flatten_bboxes[0][index]
                 )
             else:
-                value, index = th.hstack(
+                value, index = torch.hstack(
                     [
                         self.dynamics.position[indices].clone().detach()
                         - self._bboxes[0][0],
@@ -401,7 +394,7 @@ class DroneEnvsBase:
         obs = self.sceneManager.render(**kwargs) if self.visual else None
         return obs
 
-    def _find_paths(self, target: th.Tensor, indices=None):
+    def _find_paths(self, target: torch.Tensor, indices=None):
         return self.sceneManager.find_paths(target, indices)
 
     @property
