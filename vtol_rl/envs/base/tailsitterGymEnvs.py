@@ -1,6 +1,6 @@
 from stable_baselines3.common.vec_env import VecEnv
 from .droneEnv import DroneEnvsBase
-from typing import Union, List, Dict, Optional
+from typing import Union
 from gymnasium import spaces
 import numpy as np
 from abc import abstractmethod
@@ -18,12 +18,12 @@ class TailsitterEnvsBase(VecEnv):
         num_scene: int = 1,
         max_episode_steps: int = 1000,
         seed: int = 42,  # control the randomzation of envs for consistency
-        device: Optional[torch.device] = torch.device("cpu"),
-        dynamics_kwargs={},
-        random_kwargs={},
+        device: torch.device = torch.device("cpu"),
+        dynamics_kwargs: dict = {},
+        random_kwargs: dict = {},
         requires_grad: bool = False,
-        scene_kwargs: Optional[Dict] = {},
-        sensor_kwargs: Optional[List] = [],
+        scene_kwargs: dict = {},
+        sensor_kwargs: list = [],
         tensor_output: bool = True,
         is_train: bool = False,
     ):

@@ -1,8 +1,11 @@
+from vtol_rl.utils.randomization import UniformStateRandomizer
 from .base.tailsitterGymEnvs import TailsitterEnvsBase
 from typing import Optional, Dict
 import torch
 from vtol_rl.utils.type import TensorDict
 from vtol_rl.utils.logger import setup_logger
+
+UniformStateRandomizer
 
 
 class HoverEnv(TailsitterEnvsBase):
@@ -27,15 +30,25 @@ class HoverEnv(TailsitterEnvsBase):
         random_kwargs = (
             {
                 "state_generator": {
-                    "class": "Uniform",
-                    "kwargs": [
-                        {
-                            "position": {
-                                "mean": [1.0, 0.0, 1.5],
-                                "half": [1.0, 1.0, 0.5],
-                            }
+                    "class": UniformStateRandomizer,
+                    "kwargs": {
+                        "position": {
+                            "mean": [1.0, 0.0, 1.5],
+                            "radius": [1.0, 1.0, 0.5],
                         },
-                    ],
+                        "orientation": {
+                            "mean": [1.0, 0.0, 0.0, 0.0],
+                            "radius": [0.0, 0.0, 0.0, 0.0],
+                        },
+                        "velocity": {
+                            "mean": [0.0, 0.0, 0.0],
+                            "radius": [0.0, 0.0, 0.0],
+                        },
+                        "angular_velocity": {
+                            "mean": [0.0, 0.0, 0.0],
+                            "radius": [0.0, 0.0, 0.0],
+                        },
+                    },
                 }
             }
             if random_kwargs is None

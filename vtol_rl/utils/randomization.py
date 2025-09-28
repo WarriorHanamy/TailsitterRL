@@ -1,10 +1,8 @@
 import torch
 from .type import Uniform, Gaussian
 from typing import Optional
-from .maths import Quaternion
 from abc import abstractmethod
 from typing import TypeVar, Type
-
 
 rotation_matrices = torch.tensor(
     [
@@ -20,10 +18,10 @@ rotation_matrices = torch.tensor(
 class StateRandomizer:
     def __init__(
         self,
-        position,
-        orientation,  # euler angle
-        velocity,
-        angular_velocity,
+        position: dict | None = None,
+        orientation: dict | None = None,  # euler angle
+        velocity: dict | None = None,
+        angular_velocity: dict | None = None,
         seed: int = 42,
         is_collision_func: Optional[callable] = None,
         scene_id: Optional[int] = None,
@@ -35,49 +33,15 @@ class StateRandomizer:
         self.angular_velocity = angular_velocity
         self.is_collision_func = is_collision_func
         self.device = device
-        self.scene_id = scene_id
-        # self.set_seed(seed)
+        self.set_seed(seed)
 
     @abstractmethod
     def _generate(self, num) -> tuple:
         pass
 
-    def generate(self, num, **kwargs):
-        raw_pos, raw_ori, raw_vel, raw_ang_vel = self._generate(num, **kwargs)
+    def generate(self, num, _eval=False):
+        raw_pos, raw_ori, raw_vel, raw_ang_vel = self._generate(num)
         return raw_pos, raw_ori, raw_vel, raw_ang_vel
-
-    def safe_generate(self, num=1, **kwargs):
-        raw_pos, raw_ori, raw_vel, raw_ang_vel = self.generate(num, **kwargs)
-        position = raw_pos
-        orientation = raw_ori
-        velocity = raw_vel
-        angular_velocity = raw_ang_vel
-
-        if self.is_collision_func is not None:
-            is_collision = self.is_collision_func(
-                std_positions=position, scene_id=self.scene_id
-            )
-            while True:
-                if not is_collision.any():
-                    break
-                raw_pos, raw_ori, raw_vel, raw_ang_vel = self.generate(
-                    is_collision.sum(), **kwargs
-                )
-                position[is_collision, :] = raw_pos
-                orientation[is_collision, :] = raw_ori
-                velocity[is_collision, :] = raw_vel
-                angular_velocity[is_collision, :] = raw_ang_vel
-                is_collision = self.is_collision_func(
-                    std_positions=position, scene_id=self.scene_id
-                )
-
-        orientation = Quaternion.from_euler(*orientation.T).toTensor().T
-        return (
-            position.to(self.device),
-            orientation.to(self.device),
-            velocity.to(self.device),
-            angular_velocity.to(self.device),
-        )
 
     def set_seed(self, seed=42):
         torch.manual_seed(seed)
@@ -115,7 +79,7 @@ class UniformStateRandomizer(StateRandomizer):
         self.velocity_randomizer = Uniform(**velocity).to(self.device)
         self.angular_velocity_randomizer = Uniform(**angular_velocity).to(self.device)
 
-    def generate(self, num) -> tuple:
+    def _generate(self, num) -> tuple:
         position = self.position_randomizer.sample(num).to(self.device)
         orientation = self.orientation_randomizer.sample(num).to(self.device)
         velocity = self.velocity_randomizer.sample(num).to(self.device)
@@ -151,12 +115,30 @@ class GaussianStateRandomizer(StateRandomizer):
         self.velocity_randomizer = Gaussian(**velocity).to(self.device)
         self.angular_velocity_randomizer = Gaussian(**angular_velocity).to(self.device)
 
-    def generate(self, num) -> tuple:
+    def _generate(self, num) -> tuple:
         position = self.position_randomizer.sample(num).to(self.device)
         orientation = self.orientation_randomizer.sample(num).to(self.device)
         velocity = self.velocity_randomizer.sample(num).to(self.device)
         angular_velocity = self.angular_velocity_randomizer.sample(num).to(self.device)
         return position, orientation, velocity, angular_velocity
+
+
+class IMUStateRandomizer(StateRandomizer):
+    def __init__(
+        self,
+        lin_accl: dict = {"mean": [0.0, 0.0, 0.0], "std": [0.0, 0.0, 0.0]},
+        ang_vel: dict = {"mean": [0.0, 0.0, 0.0], "std": [0.0, 0.0, 0.0]},
+        device: torch.device = torch.device("cpu"),
+    ):
+        super().__init__(device=device)
+
+        self.lin_accl_randomizer = Gaussian(**lin_accl).to(self.device)
+        self.ang_vel_randomizer = Gaussian(**ang_vel).to(self.device)
+
+    def _generate(self, num) -> tuple:
+        lin_accl = self.lin_accl_randomizer.sample(num).to(self.device)
+        ang_vel = self.ang_vel_randomizer.sample(num).to(self.device)
+        return lin_accl, ang_vel
 
 
 class TargetUniformRandomizer(UniformStateRandomizer):

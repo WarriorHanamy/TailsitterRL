@@ -1,13 +1,27 @@
 import numpy as np
 import torch
-
+from dataclasses import dataclass
 from vtol_rl.utils.randomization import (
     UniformStateRandomizer,
     load_generator,
 )
-from vtol_rl.utils.type import Gaussian
+from vtol_rl.utils.randomization import IMUStateRandomizer
 
 from .dynamics import Dynamics
+
+
+# REC MARK: kept for future use.
+@dataclass
+class DroneConfig:
+    num_agent_per_scene: int = 1
+    num_scene: int = 1
+    seed: int = 42
+    visual: bool = False
+    uav_radius: float = 0.1
+    sensitive_radius: float = 10.0
+    multi_drone: bool = False
+    device: torch.device = torch.device("cpu")
+
 
 IS_BBOX_COLLISION = True
 
@@ -76,25 +90,26 @@ class DroneEnvsBase:
         self._eval = False
 
     def _create_noise_model(self):
-        self.noise_settings["IMU"] = Gaussian(
-            mean=torch.zeros(6).to(self.device),
-            std=torch.tensor(
-                [
-                    0.002,  # acc x
-                    0.002,  # acc y
-                    0.002,  # acc z
-                    0.001,  # gyro x
-                    0.001,  # gyro y
-                    0.001,  # gyro z
-                ]
+        self.noise_settings["IMU"] = (
+            IMUStateRandomizer(
+                lin_accl={"mean": [0.0, 0.0, 0.0], "std": [0.002, 0.002, 0.002]},
+                ang_vel={"mean": [0.0, 0.0, 0.0], "std": [0.001, 0.001, 0.001]},
             ).to(self.device),
         )
 
     def _generate_noise_obs(self, sensor):
         if sensor == "IMU":
-            state_with_noise = self.state + self.noise_settings["IMU"].generate(
+            lin_accl, ang_vel = self.noise_settings["IMU"][0]._generate(
                 self.dynamics.num
-            ).to(self.device)
+            )
+            state_with_noise = torch.cat(
+                [
+                    self.state[:, :10],
+                    self.state[:, 10:13] + ang_vel,
+                    self.state[:, 13:],
+                ],
+                dim=1,
+            )
             # normalize the orientation
             if self.dynamics.is_quat_output:
                 normalized_ori = torch.nn.functional.normalize(
@@ -117,12 +132,12 @@ class DroneEnvsBase:
     def _create_randomizer(self, random_kwargs: dict):
         default_state_generator_config = {
             "class": UniformStateRandomizer,
-            "kwargs": [
-                {"position": {"mean": [0.0, 0.0, 1.0], "radius": [0.0, 0.0, 0.0]}},
-            ],
+            "kwargs": {
+                "position": {"mean": [0.0, 0.0, 1.0], "radius": [0.0, 0.0, 0.1]},
+            },
         }
         state_generator_config = default_state_generator_config | random_kwargs.get(
-            "state_random", {}
+            "state_generator", {}
         )
 
         stateGenerators = []
@@ -134,12 +149,22 @@ class DroneEnvsBase:
                     load_generator(
                         cls=state_generator_config["class"],
                         device=self.device,
-                        kwargs=state_generator_config["kwargs"][0],
+                        kwargs=state_generator_config["kwargs"],
                     )
                 )
         return stateGenerators
 
-    def _generate_state(self, indices: list[int] | None = None) -> tuple[torch.Tensor]:
+    def _generate_state(
+        self, indices: list[int] | None = None
+    ) -> tuple[torch.Tensor, ...]:
+        """
+        Generate random state for the agents.
+        Args:
+            indices (list[int] | None): indices of agents to generate state for. If None, generate for all agents.
+        Returns:
+            states components: (position, orientation, velocity, angular_velocity)
+            with shapes (N, 3), (N, 4), (N, 3), (N, 3), respectively. N = len(indices)
+        """
         indices = np.arange(self.dynamics.num) if indices is None else indices
         indices = (
             torch.as_tensor([indices], device=self.device)
@@ -152,58 +177,49 @@ class DroneEnvsBase:
             torch.empty((len(indices), 3), device=self.device),
             torch.empty((len(indices), 3), device=self.device),
         )
-        for data_id, index in enumerate(indices):
+        for index_idx, index_val in enumerate(indices):
             (
-                positions[data_id],
-                orientations[data_id],
-                velocities[data_id],
-                angular_velocities[data_id],
-            ) = self.stateGenerators[index].safe_generate(
-                num=1,
-                position=self.dynamic_object_position[index][0],
-                velocity=self.dynamic_object_velocity[index][0],
-            )
+                positions[index_idx],
+                orientations[index_idx],
+                velocities[index_idx],
+                angular_velocities[index_idx],
+            ) = self.stateGenerators[index_idx].generate(num=1)
 
         return positions, orientations, velocities, angular_velocities
 
     def reset(self, state=None) -> tuple[torch.Tensor, np.ndarray | None]:
-        if self.visual:
-            if self._scene_iter or self.sceneManager.scenes[0] is None:
-                self.sceneManager.load_scenes()
         self.reset_agents(indices=None, state=state)
         return self.state, self.sensor_obs
 
     def reset_agents(
-        self, indices: list | None = None, state=None
+        self, indices: list | None = None, state: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, np.ndarray | None]:
+        """
+        Reset the agents to a specific state or random state.
+        If state is None, random state will be generated.
+        If indices is None, all agents will be reset.
+        Args:
+            indices (list | None): indices of agents to reset.
+            state (torch.Tensor | None): specific state to reset the agents to.
+        Returns:
+            update self.state and self.sensor_obs
+        """
         indices = (
             indices
             if (indices is None or hasattr(indices, "__iter__"))
             else torch.as_tensor([indices], device=self.device)
         )
+
         motor_speed, thrust, t = None, None, None
         if state is not None:
             if isinstance(state, torch.Tensor):
                 state = state.to(self.device)
-                pos, ori, vel, ori_vel, motor_speed, thrust, t = (
-                    state[:, :3].clone().detach(),
-                    state[:, 3:7].clone().detach(),
-                    state[:, 7:10].clone().detach(),
-                    state[:, 10:13].clone().detach(),
-                    state[:, 13:17].clone().detach(),
-                    state[:, 17:21].clone().detach(),
-                    state[:, 21].clone().detach(),
+                pos, ori, vel, ori_vel, motor_speed, thrust, t = torch.split(
+                    state.clone().detach(), [3, 4, 3, 3, 4, 4, 1]
                 )
-                # state[:, :3], state[:, 3:7], state[:, 7:10], state[:, 10:13], state[:, 13:17], state[:, 17:21]
-            else:
-                if len(state) == 4:
-                    pos, ori, vel, ori_vel = state
-                elif len(state) == 6:
-                    pos, ori, vel, ori_vel, motor_speed, thrust = state
-                else:
-                    raise ValueError("State should be a tuple of 4 or 6 elements.")
         else:
             pos, ori, vel, ori_vel = self._generate_state(indices)
+
         self.dynamics.reset(
             pos=pos,
             ori=ori,
@@ -214,12 +230,7 @@ class DroneEnvsBase:
             t=t,
             indices=indices,
         )
-        if self.visual:
-            self.sceneManager.reset_agents(
-                std_positions=pos, std_orientations=ori, indices=indices
-            )
         self.update_observation(indices=indices)
-        self.update_collision(indices)
 
     def reset_scenes(self, indices: list[int] | None = None):
         agent_indices = (
@@ -399,10 +410,18 @@ class DroneEnvsBase:
 
     @property
     def state(self):
+        """
+        Returns:
+            torch.Tensor: shape is (num_agents, state_dim), typically is (num_agents, 17)
+        """
         return self.dynamics.state
 
     @property
     def sensor_obs(self):
+        """
+        Returns:
+            dict of torch.Tensor: each tensor shape is (num_agents, sensor_dim)
+        """
         return self._sensor_obs
 
     @property

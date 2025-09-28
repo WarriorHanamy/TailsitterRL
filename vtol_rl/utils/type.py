@@ -6,6 +6,14 @@ import numpy as np
 import torch
 
 
+STATE_POS = slice(0, 3)
+STATE_ORI = slice(3, 7)
+STATE_VEL = slice(7, 10)
+STATE_ANG_VEL = slice(10, 13)
+STATE_MOTOR_SPEED = slice(13, 17)
+STATE_TIME = slice(17, 18)
+
+
 @dataclass
 class bound:
     min: float
@@ -61,10 +69,10 @@ class Uniform:
         """
         return the minimum value of the uniform distribution
         Args:
-            self.mean: shape (N,1)
-            self.radius: shape (N,1)
+            self.mean: shape (1, N_feats)
+            self.radius: shape (1, N_feats)
         Returns:
-            min: shape (N, 1)
+            min: shape (1, N_feats)
         """
         return self.mean - self.radius
 
@@ -73,15 +81,22 @@ class Uniform:
         """
         return the maximum value of the uniform distribution
         Args:
-            self.mean: shape (N,1)
-            self.radius: shape (N,1)
+            self.mean: shape (1, N_feats)
+            self.radius: shape (1, N_feats)
         Returns:
-            max: shape (N, 1)
+            max: shape (1, N_feats)
         """
         return self.mean + self.radius
 
     def sample(self, size):
-        return (torch.rand(size, len(self.mean)) - 0.5) * 2 * self.radius + self.mean
+        """
+        Sample from uniform distribution
+        Args:
+            size: number of samples to draw
+        Returns:
+            samples: shape (size, N_feats)
+        """
+        return (torch.rand(size, self.mean.numel()) - 0.5) * 2 * self.radius + self.mean
 
     def per_sample_normalize(self, x_orig: torch.Tensor):
         """

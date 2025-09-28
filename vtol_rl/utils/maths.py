@@ -460,9 +460,25 @@ class Integrator:
         J: torch.tensor,
         J_inv: torch.tensor,
         dt: torch.tensor,
-        type="euler",
+        type="1st_order_euler",
     ):
-        if type == "euler":
+        """
+        Args:
+            (pos, ori, vel, ori_vel): current state, shape (N, 3), (N, 4), (N, 3), (N, 3)
+            acc: linear acceleration in world frame, shape (N, 3)
+            tau: torque in body frame, shape (N, 3)
+            J: inertia matrix in body frame, shape (3, 3)
+                Future work: to be batched, add domain randomization
+            J_inv: inverse of inertia matrix in body frame, shape (3, 3)
+                Future work: to be batched, add domain randomization
+            dt: time step, shape (1,) or scalar
+            type: integration method, one of ['1st_order_euler', 'rk4']
+        Returns:
+            (pos, ori, vel, ori_vel): next state, shape (N, 3), (N, 4), (N, 3), (N, 3)
+            d_ori_vel: angular acceleration in body frame, shape (N, 3)
+
+        """
+        if type == "1st_order_euler":
             _, ori_cache, vel_cache, ori_vel_cache = (
                 pos.clone(),
                 ori.clone(),

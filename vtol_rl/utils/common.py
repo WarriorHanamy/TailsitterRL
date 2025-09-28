@@ -1,18 +1,15 @@
 import copy
 import os
 import random
-from collections import deque
 
 import cv2
 import numpy as np
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List
 
 import yaml
 from matplotlib import pyplot as plt
 from torch import Tensor
 import torch as th
-from .maths import Quaternion
-from .type import TensorDict
 
 
 def obs_list2array(obs_dict: List, row: int, column: int):
@@ -27,7 +24,9 @@ def obs_list2array(obs_dict: List, row: int, column: int):
     return np.vstack(obs_array)
 
 
-def depth2color(depth_image, colormap_type='plasma', custom_colormaps=None, max_depth=10):
+def depth2color(
+    depth_image, colormap_type="plasma", custom_colormaps=None, max_depth=10
+):
     """
     Apply different types of colormaps to depth image
 
@@ -46,17 +45,17 @@ def depth2color(depth_image, colormap_type='plasma', custom_colormaps=None, max_
         raise ValueError("Invalid depth image shape. Must be HxW or HxWx1")
 
     # Normalize depth values
-    depth_normalized = (depth_image / max_depth).clip(max=1.)
+    depth_normalized = (depth_image / max_depth).clip(max=1.0)
     depth_uint8 = (depth_normalized * 255).astype(np.uint8)
 
     # OpenCV built-in colormaps
     cv2_colormaps = {
-        'jet': cv2.COLORMAP_JET,
-        'viridis': cv2.COLORMAP_VIRIDIS,
-        'plasma': cv2.COLORMAP_PLASMA,
-        'magma': cv2.COLORMAP_MAGMA,
-        'turbo': cv2.COLORMAP_TURBO,
-        'rainbow': cv2.COLORMAP_RAINBOW
+        "jet": cv2.COLORMAP_JET,
+        "viridis": cv2.COLORMAP_VIRIDIS,
+        "plasma": cv2.COLORMAP_PLASMA,
+        "magma": cv2.COLORMAP_MAGMA,
+        "turbo": cv2.COLORMAP_TURBO,
+        "rainbow": cv2.COLORMAP_RAINBOW,
     }
 
     if colormap_type in cv2_colormaps:
@@ -69,13 +68,16 @@ def depth2color(depth_image, colormap_type='plasma', custom_colormaps=None, max_
     else:
         raise ValueError(f"Unknown colormap type: {colormap_type}")
 
+
 def depth2rgb(image):
-    max_distance = 5.
+    max_distance = 5.0
     image = image / max_distance
     image[image > 1] = 1
     image = (image * 255).astype(np.uint8)
     if len(image.shape) == 2:
-        image = np.stack([image, image, image, np.full(image.shape, 255, dtype=np.uint8)], axis=-1)
+        image = np.stack(
+            [image, image, image, np.full(image.shape, 255, dtype=np.uint8)], axis=-1
+        )
     return image
 
 
@@ -86,7 +88,11 @@ def rgba2rgb(image):
         return image[:, :, :3]
 
 
-def habitat_to_std(habitat_pos: Optional[np.ndarray] = None, habitat_ori: Optional[np.ndarray] = None, format="enu"):
+def habitat_to_std(
+    habitat_pos: Optional[np.ndarray] = None,
+    habitat_ori: Optional[np.ndarray] = None,
+    format="enu",
+):
     """_summary_
         axes transformation, from habitat-sim to std
 
@@ -106,10 +112,9 @@ def habitat_to_std(habitat_pos: Optional[np.ndarray] = None, habitat_ori: Option
     else:
         # assert habitat_pos.shape[1] == 3
         std_pos = th.as_tensor(
-            np.atleast_2d(habitat_pos) @ np.array([[0, -1, 0],
-                                                   [0, 0, 1],
-                                                   [-1, 0, 0]])
-            , dtype=th.float32)
+            np.atleast_2d(habitat_pos) @ np.array([[0, -1, 0], [0, 0, 1], [-1, 0, 0]]),
+            dtype=th.float32,
+        )
         # if len(habitat_pos.shape) == 1:
         #     std_pos = habitat_pos
 
@@ -118,18 +123,15 @@ def habitat_to_std(habitat_pos: Optional[np.ndarray] = None, habitat_ori: Option
     else:
         # assert habitat_ori.shape[1] == 4
         std_ori = th.from_numpy(
-            np.atleast_2d(habitat_ori) @ np.array(
-                [[1, 0, 0, 0],
-                 [0, 0, -1, 0],
-                 [0, 0, 0, 1],
-                 [0, -1, 0, 0]]
-            )
+            np.atleast_2d(habitat_ori)
+            @ np.array([[1, 0, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1], [0, -1, 0, 0]])
         )
     return std_pos, std_ori
 
 
-def std_to_habitat(std_pos: Optional[Tensor] = None, std_ori: Optional[Tensor] = None, format="enu") \
-        -> Tuple[Optional[Tensor], Optional[Tensor]]:
+def std_to_habitat(
+    std_pos: Optional[Tensor] = None, std_ori: Optional[Tensor] = None, format="enu"
+) -> Tuple[Optional[Tensor], Optional[Tensor]]:
     """_summary_
         axes transformation, from std to habitat-sim
 
@@ -156,23 +158,21 @@ def std_to_habitat(std_pos: Optional[Tensor] = None, std_ori: Optional[Tensor] =
         hab_ori = None
     else:
         hab_ori = std_ori.clone().detach().cpu().numpy() @ np.array(
-            [[1, 0, 0, 0],
-             [0, 0, 0, -1],
-             [0, -1, 0, 0],
-             [0, 0, 1, 0]]
+            [[1, 0, 0, 0], [0, 0, 0, -1], [0, -1, 0, 0], [0, 0, 1, 0]]
         )
 
     if std_pos is None:
         hab_pos = None
     else:
         if len(std_pos.shape) == 1:
-            hab_pos = (std_pos.clone().detach().cpu().unsqueeze(0).numpy() @ np.array([[0, 0, -1],
-                                                                                       [-1, 0, 0],
-                                                                                       [0, 1, 0]])).squeeze()
+            hab_pos = (
+                std_pos.clone().detach().cpu().unsqueeze(0).numpy()
+                @ np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]])
+            ).squeeze()
         elif std_pos.shape[1] == 3:
-            hab_pos = std_pos.clone().detach().cpu().numpy() @ np.array([[0, 0, -1],
-                                                                         [-1, 0, 0],
-                                                                         [0, 1, 0]])
+            hab_pos = std_pos.clone().detach().cpu().numpy() @ np.array(
+                [[0, 0, -1], [-1, 0, 0], [0, 1, 0]]
+            )
         else:
             raise ValueError("std_pos shape error")
 
@@ -202,14 +202,16 @@ def soft_update(target, source, tau):
 
 def check(returns, r, dones, dim=0):
     import matplotlib.pyplot as plt
+
     fig, ax1 = plt.subplots()
     ax1.plot(th.stack([th.stack(returns).cpu().T[dim], th.stack(r).cpu().T[dim]]).T)
     ax1.legend(["return", "rewards"])
     ax2 = ax1.twinx()
-    ax2.plot(th.stack(dones).cpu().T[dim], 'r-')
-    ax2.set_ylabel('dones', color='r')
+    ax2.plot(th.stack(dones).cpu().T[dim], "r-")
+    ax2.set_ylabel("dones", color="r")
     ax1.grid()
     plt.show()
+
 
 def deep_merge(origin, target):
     """
@@ -230,9 +232,11 @@ def deep_merge(origin, target):
 
 
 def load_yaml_config(path):
-    with open(path, 'r') as file:
+    with open(path, "r") as file:
         config = yaml.safe_load(file)
         if "env" in config:
-            config["eval_env"] = deep_merge(origin=config["env"], target=config["eval_env"])
+            config["eval_env"] = deep_merge(
+                origin=config["env"], target=config["eval_env"]
+            )
 
     return config

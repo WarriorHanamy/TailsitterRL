@@ -408,12 +408,6 @@ class Dynamics:
             thrusts_des = command
         # REC MARK: I remove position and velocity control for simplicity
         elif self.action_type == ACTION_TYPE.BODYRATE:
-            # REC MARK: to understand the batch operations.
-            # assert command.shape == (
-            #     4,
-            #     1,
-            # ), f"command shape should be (4, 1), but got {command.shape}"
-            command = command.squeeze(0)  # (4, N)
             angular_velocity_error = command[1:, :] - self._angular_velocity
             # self._ctrl_i += (self._BODYRATE_PID.i @ (angular_velocity_error * self.sim_time_step))
             # self._ctrl_i = self._ctrl_i.clip(min=-3, max=3)
@@ -595,7 +589,7 @@ class Dynamics:
                 "action_type should be one of ['thrust', 'bodyrate', 'velocity']"
             )
 
-    def _de_normalize(self, command):
+    def _de_normalize(self, action):
         """_summary_
             de-normalize the command to the real value
         Args:
@@ -605,20 +599,21 @@ class Dynamics:
         Returns:
             _type_: _description_
         """
-        if not isinstance(command, torch.Tensor):
-            return self._de_normalize(torch.from_numpy(command))
+        if not isinstance(action, torch.Tensor):
+            return self._de_normalize(torch.from_numpy(action))
 
         # REC MARK: we choose this order [T, bx, by, bz]
         # REC MARK: Assume commands are in shape (N, 4)
         if self.action_type == ACTION_TYPE.BODYRATE:
             command = torch.hstack(
                 [
-                    self._normals["thrust"].per_sample_denormalize(command[:, :1]),
-                    self._normals["bodyrate"].per_sample_denormalize(command[:, 1:]),
+                    self._normals["thrust"].per_sample_denormalize(action[:, :1]),
+                    self._normals["bodyrate"].per_sample_denormalize(action[:, 1:]),
                 ]
             )
         else:
             raise ValueError("action_type should be one of ['bodyrate']")
+        return command
 
     @property
     def position(self):
