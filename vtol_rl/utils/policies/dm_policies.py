@@ -1,32 +1,33 @@
 from gymnasium.vector.utils import spaces
-from stable_baselines3.common.preprocessing import get_action_dim
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, FlattenExtractor
+from stable_baselines3.common.torch_layers import (
+    BaseFeaturesExtractor,
+    FlattenExtractor,
+)
 from stable_baselines3.common.type_aliases import Schedule, PyTorchObs
 
 from .extractors import create_mlp
-from .td_policies import MTDPolicy, MultiInputPolicy, obs_as_tensor
+from .td_policies import MTDPolicy, obs_as_tensor
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import torch as th
 from torch import nn
-import numpy as np
 from stable_baselines3.common.policies import ContinuousCritic as NormalContinuousCritic
 from copy import deepcopy
 
 
 class NoActorContinuousCritic(NormalContinuousCritic):
     def __init__(
-            self,
-            observation_space: spaces.Space,
-            action_space: spaces.Box,
-            net_arch: List[int],
-            features_extractor: BaseFeaturesExtractor,
-            features_dim: int,
-            activation_fn: Type[nn.Module] = nn.ReLU,
-            normalize_images: bool = True,
-            n_critics: int = 2,
-            share_features_extractor: bool = True,
-            bn=False,
-            ln=False,
+        self,
+        observation_space: spaces.Space,
+        action_space: spaces.Box,
+        net_arch: List[int],
+        features_extractor: BaseFeaturesExtractor,
+        features_dim: int,
+        activation_fn: Type[nn.Module] = nn.ReLU,
+        normalize_images: bool = True,
+        n_critics: int = 2,
+        share_features_extractor: bool = True,
+        bn=False,
+        ln=False,
     ):
         super().__init__(
             observation_space,
@@ -38,16 +39,16 @@ class NoActorContinuousCritic(NormalContinuousCritic):
             normalize_images,
             n_critics,
             share_features_extractor,
-
         )
         self.q_networks = []
         for idx in range(n_critics):
-            net, _ = create_mlp(input_dim=features_dim,
-                             output_dim=1,
-                             activation_fn=activation_fn,
-                             layer=net_arch,
-                             bn=bn,
-                             ln=ln,
+            net, _ = create_mlp(
+                input_dim=features_dim,
+                output_dim=1,
+                activation_fn=activation_fn,
+                layer=net_arch,
+                bn=bn,
+                ln=ln,
             )
             q_net = net
             self.add_module(f"qf{idx}", q_net)
@@ -59,9 +60,9 @@ class NoActorContinuousCritic(NormalContinuousCritic):
         obs = obs_as_tensor(obs, device=self.device)
         with th.set_grad_enabled(not self.share_features_extractor):
             if hasattr(self.features_extractor, "recurrent_extractor"):
-                features, h = self.extract_features(obs, self.features_extractor)
+                features, _ = self.extract_features(obs, self.features_extractor)
             else:
-                features, h = self.extract_features(obs, self.features_extractor), None
+                features = self.extract_features(obs, self.features_extractor)
         qvalue_input = features
         return tuple(q_net(qvalue_input) for q_net in self.q_networks)
 
@@ -72,10 +73,12 @@ class NoActorContinuousCritic(NormalContinuousCritic):
         (e.g. when updating the policy in TD3).
         """
         with th.no_grad():
-            features, h = self.extract_features(obs, self.features_extractor)
+            features, _ = self.extract_features(obs, self.features_extractor)
         return self.q_networks[0](features)
 
-    def extract_features(self, obs: PyTorchObs, features_extractor: BaseFeaturesExtractor) -> th.Tensor:
+    def extract_features(
+        self, obs: PyTorchObs, features_extractor: BaseFeaturesExtractor
+    ) -> th.Tensor:
         """
         Preprocess the observation if needed and then compute the features.
         :param obs: Observation
@@ -87,27 +90,27 @@ class NoActorContinuousCritic(NormalContinuousCritic):
 
 class DMPolicy(MTDPolicy):
     def __init__(
-            self,
-            observation_space: spaces.Space,
-            action_space: spaces.Box,
-            lr_schedule: Schedule,
-            net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
-            activation_fn: Type[nn.Module] = nn.ReLU,
-            use_sde: bool = False,
-            log_std_init: float = -3,
-            use_expln: bool = False,
-            clip_mean: float = 2.0,
-            features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
-            features_extractor_kwargs: Optional[Dict[str, Any]] = None,
-            normalize_images: bool = True,
-            optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
-            optimizer_kwargs: Optional[Dict[str, Any]] = None,
-            n_critics: int = 2,
-            share_features_extractor: bool = False,
-            deterministic=False,
-            squash_output=True,
-            bn=False,
-            ln=False
+        self,
+        observation_space: spaces.Space,
+        action_space: spaces.Box,
+        lr_schedule: Schedule,
+        net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
+        activation_fn: Type[nn.Module] = nn.ReLU,
+        use_sde: bool = False,
+        log_std_init: float = -3,
+        use_expln: bool = False,
+        clip_mean: float = 2.0,
+        features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
+        features_extractor_kwargs: Optional[Dict[str, Any]] = None,
+        normalize_images: bool = True,
+        optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
+        optimizer_kwargs: Optional[Dict[str, Any]] = None,
+        n_critics: int = 2,
+        share_features_extractor: bool = False,
+        deterministic=False,
+        squash_output=True,
+        bn=False,
+        ln=False,
     ):
         super().__init__(
             observation_space=observation_space,
@@ -129,12 +132,16 @@ class DMPolicy(MTDPolicy):
             deterministic=deterministic,
             squash_output=squash_output,
             bn=bn,
-            ln=ln
+            ln=ln,
         )
         self.actor_target = deepcopy(self.actor)
 
-    def make_critic(self, features_extractor: Optional[BaseFeaturesExtractor] = None) -> NoActorContinuousCritic:
-        critic_kwargs = self._update_features_extractor(self.critic_kwargs, features_extractor)
+    def make_critic(
+        self, features_extractor: Optional[BaseFeaturesExtractor] = None
+    ) -> NoActorContinuousCritic:
+        critic_kwargs = self._update_features_extractor(
+            self.critic_kwargs, features_extractor
+        )
         critic_kwargs["ln"] = self.ln
         critic_kwargs["bn"] = self.bn
         return NoActorContinuousCritic(**critic_kwargs).to(self.device)
@@ -142,27 +149,27 @@ class DMPolicy(MTDPolicy):
 
 class MultiInputDMPolicy(DMPolicy):
     def __init__(
-            self,
-            observation_space: spaces.Space,
-            action_space: spaces.Box,
-            lr_schedule: Schedule,
-            net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
-            activation_fn: Type[nn.Module] = nn.ReLU,
-            use_sde: bool = False,
-            log_std_init: float = -3,
-            use_expln: bool = False,
-            clip_mean: float = 2.0,
-            features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
-            features_extractor_kwargs: Optional[Dict[str, Any]] = None,
-            normalize_images: bool = True,
-            optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
-            optimizer_kwargs: Optional[Dict[str, Any]] = None,
-            n_critics: int = 2,
-            share_features_extractor: bool = False,
-            deterministic=False,
-            squash_output=True,
-            bn=False,
-            ln=False
+        self,
+        observation_space: spaces.Space,
+        action_space: spaces.Box,
+        lr_schedule: Schedule,
+        net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
+        activation_fn: Type[nn.Module] = nn.ReLU,
+        use_sde: bool = False,
+        log_std_init: float = -3,
+        use_expln: bool = False,
+        clip_mean: float = 2.0,
+        features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
+        features_extractor_kwargs: Optional[Dict[str, Any]] = None,
+        normalize_images: bool = True,
+        optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
+        optimizer_kwargs: Optional[Dict[str, Any]] = None,
+        n_critics: int = 2,
+        share_features_extractor: bool = False,
+        deterministic=False,
+        squash_output=True,
+        bn=False,
+        ln=False,
     ):
         super().__init__(
             observation_space=observation_space,
@@ -184,6 +191,5 @@ class MultiInputDMPolicy(DMPolicy):
             deterministic=deterministic,
             squash_output=squash_output,
             bn=bn,
-            ln=ln
+            ln=ln,
         )
-

@@ -3,6 +3,8 @@ from scipy.spatial import KDTree
 from sklearn.neighbors import kneighbors_graph
 import networkx as nx
 from magnum import Range3D
+
+
 class PRMPlanner:
     def __init__(self, bounds, num_samples, obstacle_func, k=10, scene_id=None):
         """
@@ -22,11 +24,12 @@ class PRMPlanner:
 
         self.scene_id = scene_id
 
-
     def sample_free_space(self):
         """在自由空间内随机采样点"""
         while len(self.samples) < self.num_samples:
-            point = np.random.uniform([b[0] for b in self._bounds], [b[1] for b in self._bounds])
+            point = np.random.uniform(
+                [b[0] for b in self._bounds], [b[1] for b in self._bounds]
+            )
             if not self.obstacle_func(point, self.scene_id):
                 self.samples.append(point)
         self.samples = np.array(self.samples)
@@ -38,15 +41,22 @@ class PRMPlanner:
     def build_roadmap(self):
         """构建路线图"""
         # 使用KDTree快速查找近邻
-        tree = KDTree(self.samples)
         # 构建近邻图
-        A = kneighbors_graph(self.samples, self.k, mode='distance', metric='euclidean', include_self=False)
+        A = kneighbors_graph(
+            self.samples,
+            self.k,
+            mode="distance",
+            metric="euclidean",
+            include_self=False,
+        )
         A = A.toarray()
-        
+
         # 添加边到图中
         for i, neighbors in enumerate(A):
             for j, dist in enumerate(neighbors):
-                if dist > 0 and not self.obstacle_func((self.samples[i] + self.samples[j]) / 2, self.scene_id):  # 确保路径中间没有障碍物
+                if dist > 0 and not self.obstacle_func(
+                    (self.samples[i] + self.samples[j]) / 2, self.scene_id
+                ):  # 确保路径中间没有障碍物
                     self.graph.add_edge(i, j, weight=dist)
 
     def plan(self, start, goal):
@@ -57,21 +67,38 @@ class PRMPlanner:
         self.samples = np.vstack([self.samples, start, goal])
         self.graph.add_node(start_idx)
         self.graph.add_node(goal_idx)
-        
+
         # 将起点和终点连接到图中
         tree = KDTree(self.samples)
         start_neighbors = tree.query(start, self.k)[1]
         goal_neighbors = tree.query(goal, self.k)[1]
-        
+
         for neighbor in start_neighbors:
-            if not self.obstacle_func((start + self.samples[neighbor]) / 2, self.scene_id):
-                self.graph.add_edge(start_idx, neighbor, weight=np.linalg.norm(start - self.samples[neighbor]))
+            if not self.obstacle_func(
+                (start + self.samples[neighbor]) / 2, self.scene_id
+            ):
+                self.graph.add_edge(
+                    start_idx,
+                    neighbor,
+                    weight=np.linalg.norm(start - self.samples[neighbor]),
+                )
         for neighbor in goal_neighbors:
-            if not self.obstacle_func((goal + self.samples[neighbor]) / 2, self.scene_id):
-                self.graph.add_edge(goal_idx, neighbor, weight=np.linalg.norm(goal - self.samples[neighbor]))
-        
+            if not self.obstacle_func(
+                (goal + self.samples[neighbor]) / 2, self.scene_id
+            ):
+                self.graph.add_edge(
+                    goal_idx,
+                    neighbor,
+                    weight=np.linalg.norm(goal - self.samples[neighbor]),
+                )
+
         # 使用A*算法查找最短路径
-        path = nx.astar_path(self.graph, start_idx, goal_idx, heuristic=lambda a, b: np.linalg.norm(self.samples[a] - self.samples[b]))
+        path = nx.astar_path(
+            self.graph,
+            start_idx,
+            goal_idx,
+            heuristic=lambda a, b: np.linalg.norm(self.samples[a] - self.samples[b]),
+        )
         return [self.samples[i] for i in path]
 
     @property
@@ -85,6 +112,7 @@ class PRMPlanner:
         else:
             self._bounds = bounds
 
+
 def debug():
     def draw_ball(ax, data):
         center = data[:3]
@@ -94,19 +122,19 @@ def debug():
         x = center[0] + radius * np.outer(np.cos(u), np.sin(v))
         y = center[1] + radius * np.outer(np.sin(u), np.sin(v))
         z = center[2] + radius * np.outer(np.ones(np.size(u)), np.cos(v))
-        color = cm.coolwarm(z/7)
+        color = cm.coolwarm(z / 7)
         ax.plot_surface(x, y, z, facecolors=color, alpha=0.5)
 
-        
-    bounds = np.array([[0,0,0],[10,5,5]])
+    bounds = np.array([[0, 0, 0], [10, 5, 5]])
     ball_num = 20
-    
+
     def ball_generate(num):
         pos = np.random.uniform(bounds[0], bounds[1], [num, 3])
-        r = np.random.uniform(0.5,1,num)
+        r = np.random.uniform(0.5, 1, num)
         return np.c_[pos, r]
+
     balls = ball_generate(ball_num)
-    
+
     # 示例：定义障碍物检测函数
     def is_obstacle(point, scene_id=None):
         is_ob = False
@@ -117,14 +145,20 @@ def debug():
             if np.linalg.norm(point - center) < radius:
                 is_ob = True
                 break
-            
-        return is_ob 
+
+        return is_ob
 
     import time
-    
+
     # 创建PRM规划器实例
     start = time.time()
-    planner = PRMPlanner(bounds=((0, 10), (0, 10), (0, 10)), num_samples=500, obstacle_func=is_obstacle, k=10,scene_id=0)
+    planner = PRMPlanner(
+        bounds=((0, 10), (0, 10), (0, 10)),
+        num_samples=500,
+        obstacle_func=is_obstacle,
+        k=10,
+        scene_id=0,
+    )
     planner.pre_plan()
     # planner.sample_free_space()
     # planner.build_roadmap()
@@ -139,19 +173,21 @@ def debug():
 
     from matplotlib import pyplot as plt
     from matplotlib import cm
+
     # plot 3d path
     fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    
+    ax = fig.add_subplot(111, projection="3d")
+
     for data in balls:
         draw_ball(ax, data)
     # plot 3d path
     path = np.array(path)  # convert path to numpy array for easier slicing
 
-    ax.plot(path[:,0], path[:,1], path[:,2], linewidth=3, color="red")
+    ax.plot(path[:, 0], path[:, 1], path[:, 2], linewidth=3, color="red")
     ax.set_aspect("equal")
     plt.show()
-    fig.savefig('debug/pathfinder_demo.png')
-    
+    fig.savefig("debug/pathfinder_demo.png")
+
+
 if __name__ == "__main__":
     debug()

@@ -64,7 +64,7 @@ class Dynamics:
 
         self._interval_steps = int(self.ctrl_period / self.sim_time_step)
         self._comm_delay_steps = int(comm_delay / self.ctrl_period)
-        self._integrator = integrator
+        self._integrator = "1st_order_euler" if integrator == "euler" else integrator
         self._ctrl_delay = ctrl_delay
 
         # initialization
@@ -334,7 +334,7 @@ class Dynamics:
         else:
             action = action
         # print(f"action: {action.shape} {action}")
-        command = self._de_normalize(action.to(self.device))
+        command = self._de_normalize(action.to(self.device)).T
         # print(f"command: {command.shape} {command}")
         thrust_des = self._get_thrust_from_cmd(command)  #
         assert (thrust_des <= self._bd_thrust.max).all()  # debug

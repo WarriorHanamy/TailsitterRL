@@ -1,5 +1,5 @@
 import os.path
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 import torch as th
 from matplotlib import pyplot as plt
 from typing import List, Union
@@ -9,8 +9,6 @@ import numpy as np
 import copy
 from .FigFashion.FigFashion import FigFon
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-import imageio  # 用于生成 GIF 数据流
-from io import BytesIO  # 用于内存操作
 
 FigFon.set_fashion("IEEE")
 
@@ -20,10 +18,13 @@ def render_fig(fig):
     fig.set_dpi(50)
     canvas = FigureCanvas(fig)
     canvas.draw()  # 渲染图形
-    image_array = np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
-    image_array = image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))  # 转换为 (height, width, 3) 形状
+    image_array = np.frombuffer(canvas.tostring_rgb(), dtype="uint8")
+    image_array = image_array.reshape(
+        fig.canvas.get_width_height()[::-1] + (3,)
+    )  # 转换为 (height, width, 3) 形状
 
     return image_array
+
 
 # def create_gif(image_list):
 #     gif_buffer = BytesIO()  # 创建一个内存缓冲区
@@ -49,16 +50,20 @@ def render_fig(fig):
 #             image = np.hstack((image, images[i]))
 #     return image
 
+
 class TestBase:
     def __init__(
-            self,
-            env=None,
-            model=None,
-            name: Union[List[str], None] = None,
-            save_path: str = None,
-
+        self,
+        env=None,
+        model=None,
+        name: Union[List[str], None] = None,
+        save_path: str = None,
     ):
-        self.save_path = os.path.join(save_path, name) if save_path is not None else os.path.dirname(os.path.abspath(sys.argv[0])) + "/saved/test/" + name
+        self.save_path = (
+            os.path.join(save_path, name)
+            if save_path is not None
+            else os.path.dirname(os.path.abspath(sys.argv[0])) + "/saved/test/" + name
+        )
         if self.save_path.endswith((".zip", ".rar", ".pth")):
             self.save_path = self.save_path[:-4]
         self.model = model
@@ -75,19 +80,17 @@ class TestBase:
         self.t = []
         self.max_semantic_id = 1e-6
 
-
     def test(
-            self,
-            policy=None,
-            world=None,
-            # model=None,
-            is_fig: bool = False,
-            is_video: bool = False,
-            is_sub_video: bool = False,
-            is_fig_save: bool = False,
-            is_video_save: bool = False,
-            render_kwargs={},
-            
+        self,
+        policy=None,
+        world=None,
+        # model=None,
+        is_fig: bool = False,
+        is_video: bool = False,
+        is_sub_video: bool = False,
+        is_fig_save: bool = False,
+        is_video_save: bool = False,
+        render_kwargs={},
     ):
         if is_fig_save:
             if not is_fig:
@@ -101,15 +104,23 @@ class TestBase:
 
         # done_all = th.full((env.num_envs,), False)
         obs = env.reset(is_test=True)
-        self._img_names = [name for name in obs.keys() if (("color" in name) or ("depth" in name) or ("semantic" in name))]
+        self._img_names = [
+            name
+            for name in obs.keys()
+            if (("color" in name) or ("depth" in name) or ("semantic" in name))
+        ]
         self.obs_all.append(obs)
         self.obs_all[-1]["target"] = copy.deepcopy(env.envs.dynamic_object_position)
         self.state_all.append(env.state)
         self.info_all.append([{} for _ in range(env.num_envs)])
         self.t.append(env.t.clone())
-        self.collision_all.append({"col_dis": env.collision_dis,
-                                   "is_col": env.is_collision,
-                                   "col_pt": env.collision_point})
+        self.collision_all.append(
+            {
+                "col_dis": env.collision_dis,
+                "is_col": env.is_collision,
+                "col_pt": env.collision_point,
+            }
+        )
         agent_index = [i for i in range(env.num_agent)]
         self.eq_r = []
         self.eq_l = []
@@ -121,13 +132,21 @@ class TestBase:
                     action = action[0]
                 # obs, reward, done, info = env.step(action, is_test=True)
                 if world is not None:
-                    obs, reward, done, info = env.step(action, is_test=True, latent_func=world.step)
+                    obs, reward, done, info = env.step(
+                        action, is_test=True, latent_func=world.step
+                    )
                 else:
                     obs, reward, done, info = env.step(action, is_test=True)
-                 # = env.get_observation(), env.reward, env.done, env.info
-                col_dis, is_col, col_pt = env.collision_dis, env.is_collision, env.collision_point
+                # = env.get_observation(), env.reward, env.done, env.info
+                col_dis, is_col, col_pt = (
+                    env.collision_dis,
+                    env.is_collision,
+                    env.collision_point,
+                )
                 state = env.state
-                self.collision_all.append({"col_dis": col_dis, "is_col": is_col, "col_pt": col_pt})
+                self.collision_all.append(
+                    {"col_dis": col_dis, "is_col": is_col, "col_pt": col_pt}
+                )
 
             self.reward_all.append(reward)
             self.action_all.append(action)
@@ -138,24 +157,25 @@ class TestBase:
             self.t.append(env.t.clone())
             if env.visual:
                 # render_kwargs["points"] = env.target
-                render_image = cv2.cvtColor(env.render(**render_kwargs)[0], cv2.COLOR_RGBA2RGB)
+                render_image = cv2.cvtColor(
+                    env.render(**render_kwargs)[0], cv2.COLOR_RGBA2RGB
+                )
                 self.render_image_all.append(render_image)
             # done_all[done] = True
 
             for i in reversed(agent_index):
                 if done[i]:
-                    self.eq_r.append(info[i]['episode']['r'].item())
-                    self.eq_l.append(info[i]['episode']['l'].item())
+                    self.eq_r.append(info[i]["episode"]["r"].item())
+                    self.eq_l.append(info[i]["episode"]["l"].item())
                     agent_index.remove(i)
 
             if len(agent_index) == 0:
                 break
 
-        mean_r = th.as_tensor(self.eq_r,dtype=th.float32).mean().item()
-        mean_l = th.as_tensor(self.eq_l,dtype=th.float32).mean().item()
+        mean_r = th.as_tensor(self.eq_r, dtype=th.float32).mean().item()
+        mean_l = th.as_tensor(self.eq_l, dtype=th.float32).mean().item()
         # print(f"Average Rewards:{mean_r}, Average Length:{mean_l}")
         # save state_all and obs_all
-
 
         if is_fig:
             figs = self.draw()
@@ -169,17 +189,19 @@ class TestBase:
             if is_video_save:
                 self.save_video()
 
-        render_video = th.as_tensor(np.stack(self.render_image_all, axis=0)).unsqueeze(0) if len(self.render_image_all) > 0 else None
+        render_video = (
+            th.as_tensor(np.stack(self.render_image_all, axis=0)).unsqueeze(0)
+            if len(self.render_image_all) > 0
+            else None
+        )
         return figs, render_video, mean_r, mean_l
-
-
 
     @abstractmethod
     def draw(self, names: Union[List[str], None] = "video") -> plt.Figure:
         raise NotImplementedError
 
     # @abstractmethod
-    def play(self, render_name: Union[List[str], None] = "video",is_sub_video=False):
+    def play(self, render_name: Union[List[str], None] = "video", is_sub_video=False):
         """
         how to play the video
         """
@@ -191,16 +213,20 @@ class TestBase:
             cv2.imshow(winname=render_name, mat=image)
             if is_sub_video:
                 for name in self._img_names:
-                    sub_obs = np.hstack(np.transpose(obs[name], (0,2,3,1)))
+                    sub_obs = np.hstack(np.transpose(obs[name], (0, 2, 3, 1)))
                     if "semantic" in name:
-                        self.max_semantic_id = max(self.max_semantic_id, sub_obs.max().item())
-                        sub_obs = sub_obs/10
+                        self.max_semantic_id = max(
+                            self.max_semantic_id, sub_obs.max().item()
+                        )
+                        sub_obs = sub_obs / 10
                     if "depth" in name:
-                        sub_obs= sub_obs/10
+                        sub_obs = sub_obs / 10
                     if "color" in name:
-                        sub_obs = cv2.cvtColor(sub_obs.astype(np.uint8), cv2.COLOR_RGB2BGR)
+                        sub_obs = cv2.cvtColor(
+                            sub_obs.astype(np.uint8), cv2.COLOR_RGB2BGR
+                        )
                         pass
-                    cv2.imshow(winname=name,mat=sub_obs)
+                    cv2.imshow(winname=name, mat=sub_obs)
                     # if "depth" in name:
                     #     obs[name] = np.clip(obs[name], None, 10)
                     #     obs[name] = (cv2.cvtColor(obs[name], cv2.COLOR_GRAY2RGB) * 255 / 10).astype(np.uint8)
@@ -217,7 +243,6 @@ class TestBase:
 
     def save_video(self, is_sub_video=True):
         height, width, layers = self.render_image_all[0].shape
-        names = self.name if self.name is not None else "video"
 
         if not os.path.exists(self.save_path):
             os.makedirs(self.save_path)
@@ -227,26 +252,49 @@ class TestBase:
 
         # render video
         path = f"{self.save_path}/video.mp4"
-        video = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*'mp4v'), int(1/self.env.envs.dynamics.dt), (width, height))
+        video = cv2.VideoWriter(
+            path,
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            int(1 / self.env.envs.dynamics.dt),
+            (width, height),
+        )
         # obs video
         path_obs = []
         video_obs = []
         if is_sub_video:
             for name in self._img_names:
                 path_obs.append(f"{self.save_path}/{name}.mp4")
-                width, height = self.obs_all[0][name].shape[3]*self.obs_all[0][name].shape[0], self.obs_all[0][name].shape[2]
-                video_obs.append(cv2.VideoWriter(path_obs[-1], cv2.VideoWriter_fourcc(*'mp4v'), int(1/self.env.envs.dynamics.dt), (width, height)))
+                width, height = (
+                    self.obs_all[0][name].shape[3] * self.obs_all[0][name].shape[0],
+                    self.obs_all[0][name].shape[2],
+                )
+                video_obs.append(
+                    cv2.VideoWriter(
+                        path_obs[-1],
+                        cv2.VideoWriter_fourcc(*"mp4v"),
+                        int(1 / self.env.envs.dynamics.dt),
+                        (width, height),
+                    )
+                )
 
         # 将图片写入视频
-        for index, (image, t, obs) in enumerate(zip(self.render_image_all, self.t, self.obs_all)):
+        for index, (image, t, obs) in enumerate(
+            zip(self.render_image_all, self.t, self.obs_all)
+        ):
             image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
             video.write(image)
             if is_sub_video:
                 for i, name in enumerate(self._img_names):
                     if "depth" in name:
                         max_depth = 10
-                        img = np.clip(np.hstack(np.transpose(obs[name], (0, 2, 3, 1))),None, max_depth)
-                        img = (cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)*255/max_depth).astype(np.uint8)
+                        img = np.clip(
+                            np.hstack(np.transpose(obs[name], (0, 2, 3, 1))),
+                            None,
+                            max_depth,
+                        )
+                        img = (
+                            cv2.cvtColor(img, cv2.COLOR_GRAY2RGB) * 255 / max_depth
+                        ).astype(np.uint8)
                         video_obs[i].write(img)
                     elif "color" in name:
                         img = np.hstack(np.transpose(obs[name], (0, 2, 3, 1)))
@@ -257,7 +305,9 @@ class TestBase:
                     elif "semantic" in name:
                         max_id = self.max_semantic_id
                         img = np.hstack(np.transpose(obs[name], (0, 2, 3, 1)))
-                        img = (cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)*255/max_id).astype(np.uint8)
+                        img = (
+                            cv2.cvtColor(img, cv2.COLOR_GRAY2RGB) * 255 / max_id
+                        ).astype(np.uint8)
                         video_obs[i].write(img)
 
             # save image in cache

@@ -3,8 +3,7 @@ from abc import abstractmethod
 import gym
 import torch as th
 import torch.nn as nn
-import numpy as np
-from typing import Tuple, Callable, Any
+from typing import Tuple
 from gym import spaces
 from typing import List, Optional, Type, Union, Dict
 
@@ -32,15 +31,16 @@ class BaseFeaturesExtractor(nn.Module):
 
 
 class CustomBaseFeaturesExtractor(BaseFeaturesExtractor):
-
     def __init__(
-            self,
-            observation_space: spaces.Dict,
-            net_arch: Dict,
-            activation_fn: Type[nn.Module] = nn.ReLU,
+        self,
+        observation_space: spaces.Dict,
+        net_arch: Dict,
+        activation_fn: Type[nn.Module] = nn.ReLU,
     ):
         self._features_dim = 1
-        super(CustomBaseFeaturesExtractor, self).__init__(observation_space, self._features_dim)
+        super(CustomBaseFeaturesExtractor, self).__init__(
+            observation_space, self._features_dim
+        )
         self._is_recurrent = False
         self._extract_names = []
         # self._build_recurrent()
@@ -53,15 +53,20 @@ class CustomBaseFeaturesExtractor(BaseFeaturesExtractor):
 
     def _build_recurrent(self, net_arch):
         if net_arch.get("recurrent", None) is not None:
-            _hidden_features_dim = set_recurrent_feature_extractor(self, self._features_dim, net_arch.get("recurrent"))
+            _hidden_features_dim = set_recurrent_feature_extractor(
+                self, self._features_dim, net_arch.get("recurrent")
+            )
             self._features_dim = _hidden_features_dim
             self._is_recurrent = True
 
     def extract(self, observations) -> th.Tensor:
         features = []
         for name in self._extract_names:
-            is_exceed_dim = (len(observations[name].shape) > 4) and \
-                name in ["semantic", "color", "depth"]
+            is_exceed_dim = (len(observations[name].shape) > 4) and name in [
+                "semantic",
+                "color",
+                "depth",
+            ]
             if is_exceed_dim:
                 obs = observations[name].reshape(-1, *observations[name].shape[-3:])
             else:
@@ -77,7 +82,9 @@ class CustomBaseFeaturesExtractor(BaseFeaturesExtractor):
     def extract_with_recurrent(self, observations):
         features = self.extract(observations)
         if hasattr(self, "recurrent_extractor"):
-            features, h = self.recurrent_extractor(features.unsqueeze(0), observations['latent'].unsqueeze(0))
+            features, h = self.recurrent_extractor(
+                features.unsqueeze(0), observations["latent"].unsqueeze(0)
+            )
             return features[0], h[0]
         else:
             return features
@@ -135,8 +142,14 @@ def calc_required_input_dim(net, target_output_shape):
 
     for layer in reversed(trans_conv_layers):
         stride = layer.stride[0] if isinstance(layer.stride, tuple) else layer.stride
-        padding = layer.padding[0] if isinstance(layer.padding, tuple) else layer.padding
-        kernel_size = layer.kernel_size[0] if isinstance(layer.kernel_size, tuple) else layer.kernel_size
+        padding = (
+            layer.padding[0] if isinstance(layer.padding, tuple) else layer.padding
+        )
+        kernel_size = (
+            layer.kernel_size[0]
+            if isinstance(layer.kernel_size, tuple)
+            else layer.kernel_size
+        )
 
         # Calculate required input dimensions
         curr_h = (curr_h + 2 * padding - kernel_size) // stride + 1
@@ -144,19 +157,21 @@ def calc_required_input_dim(net, target_output_shape):
         curr_c = layer.in_channels
 
     # Return HWC format
-    return (curr_c, curr_h, curr_w,)
+    return (
+        curr_c,
+        curr_h,
+        curr_w,
+    )
 
 
 def compute_required_input_shape(
-    net: nn.Module,
-    desired_out: Tuple[int, int, int]
+    net: nn.Module, desired_out: Tuple[int, int, int]
 ) -> Tuple[int, int, int]:
     """
     反向遍历网络，逐层还原所需的输入 (C, H, W)。
     """
 
-    def _invert_size(o: int, k: int, s: int, p: int,
-                     d: int, op: int) -> int:
+    def _invert_size(o: int, k: int, s: int, p: int, d: int, op: int) -> int:
         """
         单层 ConvTranspose2d 的逆向尺寸公式：
             o = (i - 1) * s - 2p + d*(k - 1) + op + 1
@@ -166,14 +181,13 @@ def compute_required_input_shape(
         num = o - 1 - d * (k - 1) - op + 2 * p
         if num % s:
             raise ValueError(
-                f'无法整除：({o}-1-{d}*({k}-1)-{op}+2*{p}) 不能被 stride={s} 整除')
+                f"无法整除：({o}-1-{d}*({k}-1)-{op}+2*{p}) 不能被 stride={s} 整除"
+            )
         return num // s + 1
 
     C_out, H, W = desired_out
     # 仅保留 ConvTranspose2d 层，保持拓扑顺序
-    deconv_layers = [
-        m for m in net.modules() if isinstance(m, nn.ConvTranspose2d)
-    ]
+    deconv_layers = [m for m in net.modules() if isinstance(m, nn.ConvTranspose2d)]
 
     if not deconv_layers:
         raise ValueError("网络中未找到 nn.ConvTranspose2d 层")
@@ -194,7 +208,7 @@ def compute_required_input_shape(
             s=layer.stride[0],
             p=layer.padding[0],
             d=layer.dilation[0],
-            op=layer.output_padding[0]
+            op=layer.output_padding[0],
         )
         W = _invert_size(
             W,
@@ -202,7 +216,7 @@ def compute_required_input_shape(
             s=layer.stride[1],
             p=layer.padding[1],
             d=layer.dilation[1],
-            op=layer.output_padding[1]
+            op=layer.output_padding[1],
         )
 
     C_in = deconv_layers[0].in_channels  # 第一层（逆向后）输入通道
@@ -210,14 +224,14 @@ def compute_required_input_shape(
 
 
 class AutoTransDimBatchNorm1d(nn.BatchNorm1d):
-    def __init__(self,*args, **kwargs):
-        super(AutoTransDimBatchNorm1d, self).__init__(*args,**kwargs)
+    def __init__(self, *args, **kwargs):
+        super(AutoTransDimBatchNorm1d, self).__init__(*args, **kwargs)
 
     def forward(self, x: Tensor) -> Tensor:
         if x.dim() == 3:
-            x = x.permute(1,2,0)
+            x = x.permute(1, 2, 0)
             output = super().forward(x)
-            return output.permute(2,0,1)
+            return output.permute(2, 0, 1)
         else:
             return super().forward(x)
 
@@ -236,49 +250,53 @@ class ImgChLayerNorm(nn.Module):
 
 class SafeFlatten(nn.Module):
     """A safe flatten layer that uses keyword arguments to avoid PyTorch compatibility issues."""
+
     def __init__(self, start_dim=1, end_dim=-1):
         super(SafeFlatten, self).__init__()
         self.start_dim = start_dim
         self.end_dim = end_dim
-    
+
     def forward(self, x):
         return x.flatten(start_dim=self.start_dim, end_dim=self.end_dim)
 
 
 def create_trans_cnn(
-        kernel_size: List[int],
-        channel: List[int],
-        stride: List[int],
-        padding: List[int],
-        output_channel: Optional[int] = None,
-        activation_fn: Type[nn.Module] = nn.ReLU,
-        squash_output: bool = False,
-        bn: bool = False,
-        ln: bool = False,
-        bias: bool = True,
-        target_output_shape: Tuple[int, int, int] = None,
-        device: th.device = th.device("cpu")
-
+    kernel_size: List[int],
+    channel: List[int],
+    stride: List[int],
+    padding: List[int],
+    output_channel: Optional[int] = None,
+    activation_fn: Type[nn.Module] = nn.ReLU,
+    squash_output: bool = False,
+    bn: bool = False,
+    ln: bool = False,
+    bias: bool = True,
+    target_output_shape: Tuple[int, int, int] = None,
+    device: th.device = th.device("cpu"),
 ) -> nn.Module:
-    kernel_size = [kernel_size] * len(channel) if isinstance(kernel_size, int) else kernel_size
+    kernel_size = (
+        [kernel_size] * len(channel) if isinstance(kernel_size, int) else kernel_size
+    )
     stride = [stride] * len(channel) if isinstance(stride, int) else stride
     padding = [padding] * len(channel) if isinstance(padding, int) else padding
 
-    assert len(kernel_size) == len(stride) == len(padding) == len(channel), \
-        "The length of kernel_size, stride, padding and net_arch should be the same."
+    assert (
+        len(kernel_size) == len(stride) == len(padding) == len(channel)
+    ), "The length of kernel_size, stride, padding and net_arch should be the same."
 
     modules = []
 
     prev_channel = channel[0]
     for idx in range(1, len(channel)):
-        modules.append(nn.ConvTranspose2d(
-            prev_channel,
-            channel[idx],
-            kernel_size=kernel_size[idx],
-            stride=stride[idx],
-            padding=padding[idx],
-            bias=bias,
-        )
+        modules.append(
+            nn.ConvTranspose2d(
+                prev_channel,
+                channel[idx],
+                kernel_size=kernel_size[idx],
+                stride=stride[idx],
+                padding=padding[idx],
+                bias=bias,
+            )
         )
         prev_channel = channel[idx]
         if bn:
@@ -289,7 +307,15 @@ def create_trans_cnn(
         # modules.append(nn.MaxPool2d(kernel_size=2, stride=2))
 
     if output_channel is not None:
-        modules.append(nn.ConvTranspose2d(prev_channel, output_channel, kernel_size=kernel_size[-1], stride=stride[-1], padding=padding[-1]))
+        modules.append(
+            nn.ConvTranspose2d(
+                prev_channel,
+                output_channel,
+                kernel_size=kernel_size[-1],
+                stride=stride[-1],
+                padding=padding[-1],
+            )
+        )
 
     if squash_output:
         modules.append(nn.Tanh())
@@ -300,40 +326,43 @@ def create_trans_cnn(
 
 
 def create_cnn(
-        input_channels: int,
-        kernel_size: List[int],
-        channel: List[int],
-        stride: List[int],
-        padding: List[int],
-        output_channel: Optional[int] = None,
-        activation_fn: Type[nn.Module] = nn.ReLU,
-        squash_output: bool = False,
-        bn: bool = False,
-        ln: bool = False,
-        bias: bool = True,
-        max_pool: int = 0,
-        device: th.device = th.device("cpu")
-
+    input_channels: int,
+    kernel_size: List[int],
+    channel: List[int],
+    stride: List[int],
+    padding: List[int],
+    output_channel: Optional[int] = None,
+    activation_fn: Type[nn.Module] = nn.ReLU,
+    squash_output: bool = False,
+    bn: bool = False,
+    ln: bool = False,
+    bias: bool = True,
+    max_pool: int = 0,
+    device: th.device = th.device("cpu"),
 ) -> nn.Module:
-    kernel_size = [kernel_size] * len(channel) if isinstance(kernel_size, int) else kernel_size
+    kernel_size = (
+        [kernel_size] * len(channel) if isinstance(kernel_size, int) else kernel_size
+    )
     stride = [stride] * len(channel) if isinstance(stride, int) else stride
     padding = [padding] * len(channel) if isinstance(padding, int) else padding
 
-    assert len(kernel_size) == len(stride) == len(padding) == len(channel), \
-        "The length of kernel_size, stride, padding and net_arch should be the same."
+    assert (
+        len(kernel_size) == len(stride) == len(padding) == len(channel)
+    ), "The length of kernel_size, stride, padding and net_arch should be the same."
 
     prev_channel = input_channels
     modules = []
 
     for idx in range(len(channel)):
-        modules.append(nn.Conv2d(
-            prev_channel,
-            channel[idx],
-            kernel_size=kernel_size[idx],
-            stride=stride[idx],
-            padding=padding[idx],
-            bias=bias,
-        )
+        modules.append(
+            nn.Conv2d(
+                prev_channel,
+                channel[idx],
+                kernel_size=kernel_size[idx],
+                stride=stride[idx],
+                padding=padding[idx],
+                bias=bias,
+            )
         )
         prev_channel = channel[idx]
         if bn:
@@ -345,7 +374,15 @@ def create_cnn(
             modules.append(nn.MaxPool2d(kernel_size=max_pool, stride=2))
 
     if output_channel is not None:
-        modules.append(nn.Conv2d(prev_channel, output_channel, kernel_size=kernel_size[-1], stride=stride[-1], padding=padding[-1]))
+        modules.append(
+            nn.Conv2d(
+                prev_channel,
+                output_channel,
+                kernel_size=kernel_size[-1],
+                stride=stride[-1],
+                padding=padding[-1],
+            )
+        )
 
     modules.append(SafeFlatten())
 
@@ -357,16 +394,15 @@ def create_cnn(
 
 
 def create_mlp(
-        input_dim: int,
-        layer: List[int] = [],
-        output_dim: Optional[int] = None,
-        activation_fn: Type[nn.Module] = nn.ReLU,
-        bn: Union[bool, List] = False,
-        squash_output: bool = False,
-        bias: bool = True,
-        ln: Union[bool, List] = False,
-        device: th.device = th.device("cpu")
-
+    input_dim: int,
+    layer: List[int] = [],
+    output_dim: Optional[int] = None,
+    activation_fn: Type[nn.Module] = nn.ReLU,
+    bn: Union[bool, List] = False,
+    squash_output: bool = False,
+    bias: bool = True,
+    ln: Union[bool, List] = False,
+    device: th.device = th.device("cpu"),
 ) -> nn.Module:
     """
     Create a multi layer perceptron (MLP), which is
@@ -448,7 +484,11 @@ def set_mlp_feature_extractor(cls, name, observation_space, net_arch, activation
     layer = net_arch.get("layer", [])
     features_dim = layer[-1] if len(layer) != 0 else observation_space.shape[0]
     if hasattr(observation_space, "shape"):
-        input_dim = observation_space.shape[0] if len(observation_space.shape) == 1 else observation_space.shape[1]
+        input_dim = (
+            observation_space.shape[0]
+            if len(observation_space.shape) == 1
+            else observation_space.shape[1]
+        )
     else:
         input_dim = observation_space
     # input_dim = observation_space.shape[0] if len(observation_space.shape) == 1 else observation_space.shape[1]
@@ -458,10 +498,10 @@ def set_mlp_feature_extractor(cls, name, observation_space, net_arch, activation
         layer=layer,
         activation_fn=activation_fn,
         bn=net_arch.get("bn", False),
-        ln=net_arch.get("ln", False)
+        ln=net_arch.get("ln", False),
     )
     setattr(cls, name + "_extractor", net)
-    if not hasattr(cls, '_extract_names'):
+    if not hasattr(cls, "_extract_names"):
         cls._extract_names = []
     cls._extract_names.append(name)
 
@@ -469,7 +509,9 @@ def set_mlp_feature_extractor(cls, name, observation_space, net_arch, activation
     return features_dim
 
 
-def set_trans_cnn_feature_extractor(cls, name, input_dim, target_shape, net_arch, activation_fn):
+def set_trans_cnn_feature_extractor(
+    cls, name, input_dim, target_shape, net_arch, activation_fn
+):
     net = create_trans_cnn(
         activation_fn=activation_fn,
         **net_arch,
@@ -497,11 +539,9 @@ def set_cnn_feature_extractor(cls, name, observation_space, net_arch, activation
     backbone = net_arch.get("backbone", None)
     modules = []
     if backbone is not None:
-        pre_process_layer = nn.Conv2d(image_channels, 3,
-                                              kernel_size=3,
-                                              stride=1,
-                                              padding=1,
-                                              bias=True)
+        pre_process_layer = nn.Conv2d(
+            image_channels, 3, kernel_size=3, stride=1, padding=1, bias=True
+        )
         modules.append(pre_process_layer)
         image_extractor = backbone_alias[backbone](pretrained=True)
     else:
@@ -520,12 +560,12 @@ def set_cnn_feature_extractor(cls, name, observation_space, net_arch, activation
     cache_net = nn.Sequential(*modules)
     conv_output = _get_conv_output(cache_net, observation_space.shape)
     aft_process_layer, _output_dim = create_mlp(
-                                       input_dim=conv_output,
-                                       layer=net_arch.get("layer",[]),
-                                       activation_fn=activation_fn,
-                                       bn=net_arch.get("bn", False),
-                                       ln=net_arch.get("ln", False)
-                                   )
+        input_dim=conv_output,
+        layer=net_arch.get("layer", []),
+        activation_fn=activation_fn,
+        bn=net_arch.get("bn", False),
+        ln=net_arch.get("ln", False),
+    )
     modules.append(aft_process_layer)
 
     net = nn.Sequential(*modules)
@@ -536,15 +576,17 @@ def set_cnn_feature_extractor(cls, name, observation_space, net_arch, activation
 
 class TargetExtractor(CustomBaseFeaturesExtractor):
     def __init__(
-            self,
-            observation_space: spaces.Dict,
-            net_arch: Dict = {},
-            activation_fn: Type[nn.Module] = nn.ReLU,
+        self,
+        observation_space: spaces.Dict,
+        net_arch: Dict = {},
+        activation_fn: Type[nn.Module] = nn.ReLU,
     ):
         assert "target" in observation_space.keys()
-        super(TargetExtractor, self).__init__(observation_space=observation_space,
-                                              net_arch=net_arch,
-                                              activation_fn=activation_fn)
+        super(TargetExtractor, self).__init__(
+            observation_space=observation_space,
+            net_arch=net_arch,
+            activation_fn=activation_fn,
+        )
 
     def _build(self, observation_space, net_arch, activation_fn):
         feature_dim = set_mlp_feature_extractor(
@@ -552,25 +594,29 @@ class TargetExtractor(CustomBaseFeaturesExtractor):
             name="target",
             observation_space=observation_space["target"],
             net_arch=net_arch["target"],
-            activation_fn=activation_fn
+            activation_fn=activation_fn,
         )
         self._features_dim = feature_dim
 
 
 class StateExtractor(CustomBaseFeaturesExtractor):
     def __init__(
-            self,
-            observation_space: spaces.Dict,
-            net_arch: Optional[Dict] = {},
-            activation_fn: Type[nn.Module] = nn.ReLU,
+        self,
+        observation_space: spaces.Dict,
+        net_arch: Optional[Dict] = {},
+        activation_fn: Type[nn.Module] = nn.ReLU,
     ):
         assert "state" in list(observation_space.keys())
-        super(StateExtractor, self).__init__(observation_space=observation_space,
-                                             net_arch=net_arch,
-                                             activation_fn=activation_fn)
+        super(StateExtractor, self).__init__(
+            observation_space=observation_space,
+            net_arch=net_arch,
+            activation_fn=activation_fn,
+        )
 
     def _build(self, observation_space, net_arch, activation_fn):
-        feature_dim = set_mlp_feature_extractor(self, "state", observation_space["state"], net_arch["state"], activation_fn)
+        feature_dim = set_mlp_feature_extractor(
+            self, "state", observation_space["state"], net_arch["state"], activation_fn
+        )
         self._features_dim = feature_dim
 
 
@@ -587,16 +633,24 @@ class ImageExtractor(CustomBaseFeaturesExtractor):
         "mobilenet_s": models.mobilenet_v3_small,
     }
 
-    def __init__(self,
-                 observation_space: spaces.Dict,
-                 net_arch: Dict = {},
-                 activation_fn: Type[nn.Module] = nn.ReLU,
-                 ):
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        net_arch: Dict = {},
+        activation_fn: Type[nn.Module] = nn.ReLU,
+    ):
         # assume at least one image observation
-        assert th.as_tensor([(key in "semantic") or ("color" in key) or ("depth" in key) for key in observation_space.keys()]).any()
-        super(ImageExtractor, self).__init__(observation_space=observation_space,
-                                             net_arch=net_arch,
-                                             activation_fn=activation_fn)
+        assert th.as_tensor(
+            [
+                (key in "semantic") or ("color" in key) or ("depth" in key)
+                for key in observation_space.keys()
+            ]
+        ).any()
+        super(ImageExtractor, self).__init__(
+            observation_space=observation_space,
+            net_arch=net_arch,
+            activation_fn=activation_fn,
+        )
 
     def _build(self, observation_space, net_arch, activation_fn):
         # 处理image的卷积层
@@ -605,139 +659,232 @@ class ImageExtractor(CustomBaseFeaturesExtractor):
         for key in observation_space.keys():
             if "semantic" in key or "color" in key or "depth" in key:
                 _image_features_dims.append(
-                    set_cnn_feature_extractor(self, key, observation_space[key], net_arch.get(key, {}), activation_fn)
+                    set_cnn_feature_extractor(
+                        self,
+                        key,
+                        observation_space[key],
+                        net_arch.get(key, {}),
+                        activation_fn,
+                    )
                 )
         self._features_dim = sum(_image_features_dims)
 
 
 class FlexibleExtractor(CustomBaseFeaturesExtractor):
-    def __init__(self,
-                 observation_space: spaces.Dict,
-                 net_arch: Dict = {},
-                 activation_fn: Type[nn.Module] = nn.ReLU,
-                 ):
-        super(FlexibleExtractor, self).__init__(observation_space=observation_space,
-                                                 net_arch=net_arch,
-                                                 activation_fn=activation_fn)
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        net_arch: Dict = {},
+        activation_fn: Type[nn.Module] = nn.ReLU,
+    ):
+        super(FlexibleExtractor, self).__init__(
+            observation_space=observation_space,
+            net_arch=net_arch,
+            activation_fn=activation_fn,
+        )
 
     def _build(self, observation_space, net_arch, activation_fn):
         self._features_dim = 0
         for key, value in net_arch.items():
             if "semantic" in key or "color" in key or "depth" in key:
-                _image_features_dim = set_cnn_feature_extractor(self, key, observation_space[key], net_arch.get(key, {}), activation_fn)
+                _image_features_dim = set_cnn_feature_extractor(
+                    self,
+                    key,
+                    observation_space[key],
+                    net_arch.get(key, {}),
+                    activation_fn,
+                )
                 self._features_dim += _image_features_dim
             elif "state" in key:
-                _state_features_dim = set_mlp_feature_extractor(self, key, observation_space[key], net_arch.get(key, {}), activation_fn)
+                _state_features_dim = set_mlp_feature_extractor(
+                    self,
+                    key,
+                    observation_space[key],
+                    net_arch.get(key, {}),
+                    activation_fn,
+                )
                 self._features_dim += _state_features_dim
 
 
 class StateTargetExtractor(CustomBaseFeaturesExtractor):
-    def __init__(self,
-                 observation_space: spaces.Dict,
-                 net_arch: Dict = {},
-                 activation_fn: Type[nn.Module] = nn.ReLU,
-                 ):
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        net_arch: Dict = {},
+        activation_fn: Type[nn.Module] = nn.ReLU,
+    ):
         obs_keys = list(observation_space.keys())
         assert ("state" in obs_keys) and ("target" in obs_keys)
-        super(StateTargetExtractor, self).__init__(observation_space=observation_space,
-                                                   net_arch=net_arch,
-                                                   activation_fn=activation_fn)
+        super(StateTargetExtractor, self).__init__(
+            observation_space=observation_space,
+            net_arch=net_arch,
+            activation_fn=activation_fn,
+        )
 
     def _build(self, observation_space, net_arch, activation_fn):
-        state_features_dim = set_mlp_feature_extractor(self, "state", observation_space["state"], net_arch.get("state", {}), activation_fn)
-        target_features_dim = set_mlp_feature_extractor(self, "target", observation_space["target"], net_arch.get("target", {}), activation_fn)
+        state_features_dim = set_mlp_feature_extractor(
+            self,
+            "state",
+            observation_space["state"],
+            net_arch.get("state", {}),
+            activation_fn,
+        )
+        target_features_dim = set_mlp_feature_extractor(
+            self,
+            "target",
+            observation_space["target"],
+            net_arch.get("target", {}),
+            activation_fn,
+        )
 
         self._features_dim = state_features_dim + target_features_dim
 
 
 class StateImageExtractor(ImageExtractor):
-    def __init__(self,
-                 observation_space: spaces.Dict,
-                 net_arch: Dict = {},
-                 activation_fn: Type[nn.Module] = nn.ReLU,
-                 ):
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        net_arch: Dict = {},
+        activation_fn: Type[nn.Module] = nn.ReLU,
+    ):
         obs_keys = list(observation_space.keys())
         assert "state" in obs_keys
-        super(StateImageExtractor, self).__init__(observation_space=observation_space,
-                                                  net_arch=net_arch,
-                                                  activation_fn=activation_fn)
+        super(StateImageExtractor, self).__init__(
+            observation_space=observation_space,
+            net_arch=net_arch,
+            activation_fn=activation_fn,
+        )
 
     def _build(self, observation_space, net_arch, activation_fn):
         super()._build(observation_space, net_arch, activation_fn)
-        _state_features_dim = set_mlp_feature_extractor(self, "state", observation_space["state"], net_arch.get("state", {}), activation_fn)
+        _state_features_dim = set_mlp_feature_extractor(
+            self,
+            "state",
+            observation_space["state"],
+            net_arch.get("state", {}),
+            activation_fn,
+        )
         self._features_dim = _state_features_dim + self._features_dim
 
 
 class StateTargetImageExtractor(ImageExtractor):
-    def __init__(self,
-                 observation_space: spaces.Dict,
-                 net_arch: Dict = {},
-                 activation_fn: Type[nn.Module] = nn.ReLU,
-                 ):
-        assert ("target" in list(observation_space.keys())) and ("state" in list(observation_space.keys()))
-        super(StateTargetImageExtractor, self).__init__(observation_space=observation_space,
-                                                        net_arch=net_arch,
-                                                        activation_fn=activation_fn)
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        net_arch: Dict = {},
+        activation_fn: Type[nn.Module] = nn.ReLU,
+    ):
+        assert ("target" in list(observation_space.keys())) and (
+            "state" in list(observation_space.keys())
+        )
+        super(StateTargetImageExtractor, self).__init__(
+            observation_space=observation_space,
+            net_arch=net_arch,
+            activation_fn=activation_fn,
+        )
 
     def _build(self, observation_space, net_arch, activation_fn):
         super()._build(observation_space, net_arch, activation_fn)
-        _image_features_dim = self._features_dim  # Store the image features dimension from parent
-        _state_features_dim = set_mlp_feature_extractor(self, "state", observation_space["state"], net_arch.get("state", {}), activation_fn)
-        _target_features_dim = set_mlp_feature_extractor(self, "target", observation_space["target"], net_arch.get("target", {}), activation_fn)
-        
+        _image_features_dim = (
+            self._features_dim
+        )  # Store the image features dimension from parent
+        _state_features_dim = set_mlp_feature_extractor(
+            self,
+            "state",
+            observation_space["state"],
+            net_arch.get("state", {}),
+            activation_fn,
+        )
+        _target_features_dim = set_mlp_feature_extractor(
+            self,
+            "target",
+            observation_space["target"],
+            net_arch.get("target", {}),
+            activation_fn,
+        )
+
         # Check if there are actually any image features (extractors with image-like names)
-        has_image_features = any("semantic" in name or "color" in name or "depth" in name 
-                                for name in self._extract_names)
-        
+        has_image_features = any(
+            "semantic" in name or "color" in name or "depth" in name
+            for name in self._extract_names
+        )
+
         if has_image_features:
-            self._features_dim = _state_features_dim + _target_features_dim + _image_features_dim
+            self._features_dim = (
+                _state_features_dim + _target_features_dim + _image_features_dim
+            )
         else:
             self._features_dim = _state_features_dim + _target_features_dim
 
 
 class SwarmStateTargetImageExtractor(StateTargetImageExtractor):
-    def __init__(self,
-                 observation_space: spaces.Dict,
-                 net_arch: Dict = {},
-                 activation_fn: Type[nn.Module] = nn.ReLU,
-                 ):
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        net_arch: Dict = {},
+        activation_fn: Type[nn.Module] = nn.ReLU,
+    ):
         obs_keys = list(observation_space.keys())
         assert "swarm" in obs_keys
 
         super(SwarmStateTargetImageExtractor, self).__init__(
             observation_space=observation_space,
             net_arch=net_arch,
-            activation_fn=activation_fn
+            activation_fn=activation_fn,
         )
 
     def _build(self, observation_space, net_arch, activation_fn):
         super()._build(
             observation_space=observation_space,
             net_arch=net_arch,
-            activation_fn=activation_fn
+            activation_fn=activation_fn,
         )
-        _swarm_features_dim = set_mlp_feature_extractor(self, "swarm", observation_space["swarm"], net_arch.get("state", {}), activation_fn) * \
-                              observation_space["swarm"].shape[0]
+        _swarm_features_dim = (
+            set_mlp_feature_extractor(
+                self,
+                "swarm",
+                observation_space["swarm"],
+                net_arch.get("state", {}),
+                activation_fn,
+            )
+            * observation_space["swarm"].shape[0]
+        )
         self._features_dim = self._features_dim + _swarm_features_dim
 
 
 class StateGateExtractor(StateExtractor):
-    def __init__(self, observation_space: spaces.Dict,
-                 net_arch: Optional[Dict] = {},
-                 activation_fn: Type[nn.Module] = nn.ReLU, ):
-        super(StateGateExtractor, self).__init__(observation_space=observation_space, net_arch=net_arch, activation_fn=activation_fn)
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        net_arch: Optional[Dict] = {},
+        activation_fn: Type[nn.Module] = nn.ReLU,
+    ):
+        super(StateGateExtractor, self).__init__(
+            observation_space=observation_space,
+            net_arch=net_arch,
+            activation_fn=activation_fn,
+        )
 
     def _build(self, observation_space, net_arch, activation_fn):
         super()._build(observation_space, net_arch, activation_fn)
-        gate_feature_dim = set_mlp_feature_extractor(self, "gate", observation_space["gate"], net_arch["gate"], activation_fn)
+        gate_feature_dim = set_mlp_feature_extractor(
+            self, "gate", observation_space["gate"], net_arch["gate"], activation_fn
+        )
         self._features_dim = self._features_dim + gate_feature_dim
 
 
 class EmptyExtractor(CustomBaseFeaturesExtractor):
-    def __init__(self, observation_space: spaces.Dict,
-                 net_arch: Optional[Dict] = {},
-                 activation_fn: Type[nn.Module] = nn.ReLU, ):
-        super(EmptyExtractor, self).__init__(observation_space=observation_space, net_arch=net_arch, activation_fn=activation_fn)
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        net_arch: Optional[Dict] = {},
+        activation_fn: Type[nn.Module] = nn.ReLU,
+    ):
+        super(EmptyExtractor, self).__init__(
+            observation_space=observation_space,
+            net_arch=net_arch,
+            activation_fn=activation_fn,
+        )
         # self._features_dim = observation_space.shape[0]
 
     def _build(self, observation_space, net_arch, activation_fn):
@@ -745,9 +892,12 @@ class EmptyExtractor(CustomBaseFeaturesExtractor):
 
 
 class LatentCombineExtractor(nn.Module):
-    def __init__(self, observation_space: spaces.Dict,
-                 net_arch: Optional[Dict] = {},
-                 activation_fn: Type[nn.Module] = nn.ReLU, ):
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        net_arch: Optional[Dict] = {},
+        activation_fn: Type[nn.Module] = nn.ReLU,
+    ):
         super(LatentCombineExtractor, self).__init__()
         _features_dim = 0
         for key in observation_space.keys():
@@ -772,18 +922,15 @@ class LatentCombineExtractor(nn.Module):
 
 
 class FlexibleMLP(nn.Module):
-    extractor_alias: Dict = {
-        "MLP": create_mlp,
-        "CNN": create_cnn
-    }
+    extractor_alias: Dict = {"MLP": create_mlp, "CNN": create_cnn}
 
     def __init__(
-            self,
-            sub_extractors: List[BaseFeaturesExtractor],
-            observation_space: spaces.Dict,
-            net_arch: Dict,
-            activation_fn: Type[nn.Module] = nn.ReLU,
-            device: th.device = th.device("cpu"),
+        self,
+        sub_extractors: List[BaseFeaturesExtractor],
+        observation_space: spaces.Dict,
+        net_arch: Dict,
+        activation_fn: Type[nn.Module] = nn.ReLU,
+        device: th.device = th.device("cpu"),
     ):
         super(FlexibleMLP, self).__init__(
             observation_space=observation_space,
@@ -793,7 +940,7 @@ class FlexibleMLP(nn.Module):
             net_arch=net_arch,
             activation_fn=activation_fn,
             observation_space=observation_space,
-            sub_extractors=sub_extractors
+            sub_extractors=sub_extractors,
         )
 
     def _build(self, observation_space, net_arch, activation_fn, sub_extractors):
@@ -802,7 +949,9 @@ class FlexibleMLP(nn.Module):
                 extractor_func = self.extractor_alias["extractor_class"]
             else:
                 raise NotImplementedError
-            return extractor_func(input_dim=observation_space["extractor_class"].shape, **extractor_kwargs)
+            return extractor_func(
+                input_dim=observation_space["extractor_class"].shape, **extractor_kwargs
+            )
 
         features_dims = []
         for i, (ex_class, ex_kwargs) in enumerate(sub_extractors):
@@ -816,7 +965,7 @@ class FlexibleMLP(nn.Module):
             layer=net_arch.get("layer", []),
             activation_fn=activation_fn,
             bn=net_arch.get("bn", False),
-            ln=net_arch.get("ln", False)
+            ln=net_arch.get("ln", False),
         )
 
     def forward(self, x):
@@ -840,5 +989,6 @@ def load_extractor_class(cls):
     if cls in cls_alias.keys():
         return cls_alias[cls]
     else:
-        raise ValueError(f"Extractor class {cls} not found in alias. Available classes: {list(cls_alias.keys())}")
-
+        raise ValueError(
+            f"Extractor class {cls} not found in alias. Available classes: {list(cls_alias.keys())}"
+        )

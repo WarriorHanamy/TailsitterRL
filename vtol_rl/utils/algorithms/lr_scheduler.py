@@ -1,7 +1,7 @@
 from typing import Callable, Union
 
 
-def linear_schedule(initial: float, final: float = 0.) -> Callable[[float], float]:
+def linear_schedule(initial: float, final: float = 0.0) -> Callable[[float], float]:
     """
     Linear learning rate schedule.
 
@@ -17,7 +17,7 @@ def linear_schedule(initial: float, final: float = 0.) -> Callable[[float], floa
         :param progress_remaining:
         :return: current learning rate
         """
-        return progress_remaining * (initial-final) + final
+        return progress_remaining * (initial - final) + final
 
     return func
 
@@ -52,13 +52,10 @@ def transfer_schedule(learning_rate: Union[dict, float]) -> Callable[[float], fl
     :return: schedule that computes
       current learning rate depending on remaining progress
     """
-    class_alias = {
-        'linear': linear_schedule,
-        'exponential': exponential_schedule
-    }
+    class_alias = {"linear": linear_schedule, "exponential": exponential_schedule}
     if isinstance(learning_rate, dict):
-        schedule_class = class_alias[learning_rate['class']]
-        return schedule_class(**learning_rate['kwargs'])
+        schedule_class = class_alias[learning_rate["class"]]
+        return schedule_class(**learning_rate["kwargs"])
     elif isinstance(learning_rate, (int, float)):
         return learning_rate
     else:

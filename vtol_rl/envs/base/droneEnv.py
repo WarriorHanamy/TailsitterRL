@@ -53,7 +53,11 @@ class DroneEnvsBase:
 
         self.uav_radius = uav_radius
 
-        self.visual = visual
+        if visual:
+            raise ValueError(
+                "Habitat-based visual simulation has been removed; set visual=False."
+            )
+        self.visual = False
 
         self.noise_settings = random_kwargs.get("noise_kwargs", {})
         self.dynamics = Dynamics(
@@ -72,9 +76,6 @@ class DroneEnvsBase:
         if "obj_settings" in scene_kwargs:
             scene_kwargs["obj_settings"]["dt"] = self.dynamics.ctrl_dt
 
-        # REC MARK: kept for avoiding error, but not used
-        self.sceneManager = None
-
         self.stateGenerators = self._create_randomizer(random_kwargs)
         self._scene_iter = random_kwargs.get("scene_iter", False)
 
@@ -85,7 +86,6 @@ class DroneEnvsBase:
             else []
         )
         self._visual_sensor_list = [s for s in self._sensor_list if "IMU" not in s]
-        # self.reset()
 
         self._eval = False
 
@@ -232,135 +232,38 @@ class DroneEnvsBase:
         )
         self.update_observation(indices=indices)
 
-    def reset_scenes(self, indices: list[int] | None = None):
-        agent_indices = (
-            (
-                torch.tile(
-                    torch.arange(self.sceneManager.num_agent_per_scene),
-                    (len(indices), 1),
-                )
-                + (indices.unsqueeze(1) * self.sceneManager.num_agent_per_scene)
-            ).reshape(-1, 1)
-        ).flatten()
-        self.reset_agents(agent_indices)
-        self.sceneManager.reset_scenes(indices)
-
     def update_observation(self, indices=None):
-        if self.visual:
-            if indices is None:
-                img_obs = self.sceneManager.get_observation()
-                # training channel sequence
-                for sensor_uuid in self._visual_sensor_list:
-                    if "depth" in sensor_uuid:
-                        self._sensor_obs[sensor_uuid] = np.expand_dims(
-                            np.stack(
-                                [
-                                    each_agent_obs[sensor_uuid]
-                                    for each_agent_obs in img_obs
-                                ]
-                            ),
-                            1,
-                        )
-                        # self._sensor_obs[sensor_uuid][:, :, :, :][self._sensor_obs[sensor_uuid][index, :, :, :] == 0] = 100
-                        self._sensor_obs[sensor_uuid] = np.where(
-                            self._sensor_obs[sensor_uuid] == 0,
-                            20,
-                            self._sensor_obs[sensor_uuid],
-                        )
-                    elif "color" in sensor_uuid:
-                        self._sensor_obs[sensor_uuid] = np.transpose(
-                            np.stack(
-                                [
-                                    each_agent_obs[sensor_uuid]
-                                    for each_agent_obs in img_obs
-                                ]
-                            )[..., :3],
-                            (0, 3, 1, 2),
-                        )
-                    elif "semantic" in sensor_uuid:
-                        self._sensor_obs[sensor_uuid] = np.expand_dims(
-                            np.stack(
-                                [
-                                    each_agent_obs[sensor_uuid]
-                                    for each_agent_obs in img_obs
-                                ]
-                            ),
-                            1,
-                        )
-                    else:
-                        raise KeyError("Can not find uuid of sensors")
-            else:
-                img_obs = self.sceneManager.get_observation(indices=indices)
-                for each_agent_obs, index in zip(img_obs, indices):
-                    for sensor_uuid in self._visual_sensor_list:
-                        if "depth" in sensor_uuid:
-                            self._sensor_obs[sensor_uuid][index, :, :, :] = (
-                                np.expand_dims(each_agent_obs[sensor_uuid], 0)
-                            )
-                            # set background (value==0) to 20
-                            self._sensor_obs[sensor_uuid][index, :, :, :][
-                                self._sensor_obs[sensor_uuid][index, :, :, :] == 0
-                            ] = 20
-                        elif "color" in sensor_uuid:
-                            self._sensor_obs[sensor_uuid][index, :, :, :] = (
-                                np.transpose(
-                                    each_agent_obs[sensor_uuid][..., :3], (2, 0, 1)
-                                )
-                            )
-                        elif "semantic" in sensor_uuid:
-                            self._sensor_obs[sensor_uuid][index, :, :, :] = (
-                                each_agent_obs[sensor_uuid]
-                            )
-                        else:
-                            raise KeyError("Can not find uuid of sensors")
-
         self._sensor_obs["IMU"] = self._generate_noise_obs("IMU")
 
     def update_collision(self, indices: list[int] | None = None):
-        if self.visual:
-            if indices is None:
-                self._collision_point = self.sceneManager.get_collision_point().to(
-                    self.device
-                )
-            # indices are not None
-            else:
-                self._collision_point[indices] = self.sceneManager.get_collision_point(
-                    indices=indices
-                ).to(self.device)
-            self._is_out_bounds = self.sceneManager.is_out_bounds.to(self.device)
-
-        # not visual
-        else:
-            if indices is None:
-                value, index = torch.hstack(
-                    [
-                        self.dynamics.position.clone().detach() - self._bboxes[0][0],
-                        self._bboxes[0][1] - self.dynamics.position.clone().detach(),
-                    ]
-                ).min(dim=1)
-                self._collision_point = self.dynamics.position.clone().detach()
-                self._collision_point[torch.arange(self.dynamics.num), index % 3] = (
-                    self._flatten_bboxes[0][index]
-                )
-            else:
-                value, index = torch.hstack(
-                    [
-                        self.dynamics.position[indices].clone().detach()
-                        - self._bboxes[0][0],
-                        self._bboxes[0][1]
-                        - self.dynamics.position[indices].clone().detach(),
-                    ]
-                ).min(dim=1)
-                self._collision_point[indices] = (
-                    self.dynamics.position[indices].clone().detach()
-                )
-                self._collision_point[indices, index % 3] = self._flatten_bboxes[0][
-                    index
+        if indices is None:
+            value, index = torch.hstack(
+                [
+                    self.dynamics.position.clone().detach() - self._bboxes[0][0],
+                    self._bboxes[0][1] - self.dynamics.position.clone().detach(),
                 ]
+            ).min(dim=1)
+            self._collision_point = self.dynamics.position.clone().detach()
+            self._collision_point[torch.arange(self.dynamics.num), index % 3] = (
+                self._flatten_bboxes[0][index]
+            )
+        else:
+            value, index = torch.hstack(
+                [
+                    self.dynamics.position[indices].clone().detach()
+                    - self._bboxes[0][0],
+                    self._bboxes[0][1]
+                    - self.dynamics.position[indices].clone().detach(),
+                ]
+            ).min(dim=1)
+            self._collision_point[indices] = (
+                self.dynamics.position[indices].clone().detach()
+            )
+            self._collision_point[indices, index % 3] = self._flatten_bboxes[0][index]
 
-            self._is_out_bounds = (self.dynamics.position < self._bboxes[0][0]).any(
-                dim=1
-            ) | (self.dynamics.position > self._bboxes[0][1]).any(dim=1)
+        self._is_out_bounds = (self.dynamics.position < self._bboxes[0][0]).any(
+            dim=1
+        ) | (self.dynamics.position > self._bboxes[0][1]).any(dim=1)
 
         self._collision_vector = self._collision_point - self.position
         self._collision_dis = (self._collision_vector - 0).norm(dim=1)
@@ -369,14 +272,15 @@ class DroneEnvsBase:
         ) | self._is_out_bounds
 
     def step(self, action):
+        if isinstance(action, torch.Tensor):
+            if action.dim() == 3 and action.size(-1) == 1:
+                action = action.squeeze(-1)
         self.dynamics.step(action)
         self.update_observation()
         self.update_collision()
 
     def set_seed(self, seed: int | None = 42):
         seed = self.seed if seed is None else seed
-        if self.visual:
-            self.sceneManager.seed = seed
         self.dynamics.set_seed(seed)
 
     def stack(self):
@@ -395,18 +299,9 @@ class DroneEnvsBase:
 
     def close(self):
         self.dynamics.close()
-        self.sceneManager.close() if self.visual else None
-        delattr(self, "sceneManager")
-        self.sceneManager = None
 
     def render(self, **kwargs):
-        if not self.visual:
-            raise ValueError("The environment is not visually available.")
-        obs = self.sceneManager.render(**kwargs) if self.visual else None
-        return obs
-
-    def _find_paths(self, target: torch.Tensor, indices=None):
-        return self.sceneManager.find_paths(target, indices)
+        raise ValueError("Visual rendering is no longer supported without habitat_sim.")
 
     @property
     def state(self):
@@ -486,21 +381,12 @@ class DroneEnvsBase:
 
     @property
     def dynamic_object_position(self):
-        if self.sceneManager:
-            return self.sceneManager.dynamic_object_position
-        else:
-            return [[None] for _ in range(self.dynamics.num)]
+        return [[None] for _ in range(self.dynamics.num)]
 
     @property
     def dynamic_object_velocity(self):
-        if self.sceneManager:
-            return self.sceneManager.dynamic_object_velocity
-        else:
-            return [[None] for _ in range(self.dynamics.num)]
+        return [[None] for _ in range(self.dynamics.num)]
 
     @property
     def dynamic_object_acceleration(self):
-        if self.sceneManager:
-            return self.sceneManager.dynamic_object_acceleration
-        else:
-            return [[None] for _ in range(self.dynamics.num)]
+        return [[None] for _ in range(self.dynamics.num)]

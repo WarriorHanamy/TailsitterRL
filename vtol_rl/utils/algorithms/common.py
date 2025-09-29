@@ -6,7 +6,12 @@ import numpy as np
 from gym.vector.utils import spaces
 from stable_baselines3.common.buffers import BaseBuffer
 import torch as th
-from stable_baselines3.common.type_aliases import RolloutBufferSamples, DictRolloutBufferSamples, ReplayBufferSamples, DictReplayBufferSamples
+from stable_baselines3.common.type_aliases import (
+    RolloutBufferSamples,
+    DictRolloutBufferSamples,
+    ReplayBufferSamples,
+    DictReplayBufferSamples,
+)
 from stable_baselines3.common.vec_env import VecNormalize
 from VisFly.utils.type import TensorDict
 
@@ -43,6 +48,7 @@ def extract_all_paras(model: th.nn.Module) -> Tuple[th.Tensor, th.Tensor]:
             biases.append(para.flatten())
     return th.cat(weights), th.cat(biases)
 
+
 class RolloutBuffer(BaseBuffer):
     """
     A Tensor-type saving version from original buffer in stable-baselines3
@@ -67,34 +73,44 @@ class RolloutBuffer(BaseBuffer):
     values: th.Tensor
 
     def __init__(
-            self,
-            buffer_size: int,
-            observation_space: spaces.Space,
-            action_space: spaces.Space,
-            device: Union[th.device, str] = "auto",
-            gae_lambda: float = 1,
-            gamma: float = 0.99,
-            n_envs: int = 1,
+        self,
+        buffer_size: int,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        device: Union[th.device, str] = "auto",
+        gae_lambda: float = 1,
+        gamma: float = 0.99,
+        n_envs: int = 1,
     ):
-        super().__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
+        super().__init__(
+            buffer_size, observation_space, action_space, device, n_envs=n_envs
+        )
         self.gae_lambda = gae_lambda
         self.gamma = gamma
         self.generator_ready = False
         self.reset()
 
     def reset(self) -> None:
-        self.observations = th.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=th.float32)
-        self.actions = th.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=th.float32)
+        self.observations = th.zeros(
+            (self.buffer_size, self.n_envs, *self.obs_shape), dtype=th.float32
+        )
+        self.actions = th.zeros(
+            (self.buffer_size, self.n_envs, self.action_dim), dtype=th.float32
+        )
         self.rewards = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
         self.returns = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
-        self.episode_starts = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
+        self.episode_starts = th.zeros(
+            (self.buffer_size, self.n_envs), dtype=th.float32
+        )
         self.values = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
         self.log_probs = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
         self.advantages = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
         self.generator_ready = False
         super().reset()
 
-    def compute_returns_and_advantage(self, last_values: th.Tensor, dones: th.Tensor) -> None:
+    def compute_returns_and_advantage(
+        self, last_values: th.Tensor, dones: th.Tensor
+    ) -> None:
         """
         Post-processing step: compute the lambda-return (TD(lambda) estimate)
         and GAE(lambda) advantage.
@@ -124,21 +140,27 @@ class RolloutBuffer(BaseBuffer):
             else:
                 next_non_terminal = 1.0 - self.episode_starts[step + 1]
                 next_values = self.values[step + 1]
-            delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
-            last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+            delta = (
+                self.rewards[step]
+                + self.gamma * next_values * next_non_terminal
+                - self.values[step]
+            )
+            last_gae_lam = (
+                delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+            )
             self.advantages[step] = last_gae_lam
         # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
         # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
         self.returns = self.advantages + self.values
 
     def add(
-            self,
-            obs: th.Tensor,
-            action: th.Tensor,
-            reward: th.Tensor,
-            episode_start: th.Tensor,
-            value: th.Tensor,
-            log_prob: th.Tensor,
+        self,
+        obs: th.Tensor,
+        action: th.Tensor,
+        reward: th.Tensor,
+        episode_start: th.Tensor,
+        value: th.Tensor,
+        log_prob: th.Tensor,
     ) -> None:
         """
         :param obs: Observation
@@ -172,7 +194,9 @@ class RolloutBuffer(BaseBuffer):
         if self.pos == self.buffer_size:
             self.full = True
 
-    def get(self, batch_size: Optional[int] = None) -> Generator[RolloutBufferSamples, None, None]:
+    def get(
+        self, batch_size: Optional[int] = None
+    ) -> Generator[RolloutBufferSamples, None, None]:
         assert self.full, ""
         indices = th.random.permutation(self.buffer_size * self.n_envs)
         # Prepare the data
@@ -196,13 +220,13 @@ class RolloutBuffer(BaseBuffer):
 
         start_idx = 0
         while start_idx < self.buffer_size * self.n_envs:
-            yield self._get_samples(indices[start_idx: start_idx + batch_size])
+            yield self._get_samples(indices[start_idx : start_idx + batch_size])
             start_idx += batch_size
 
     def _get_samples(
-            self,
-            batch_inds: th.Tensor,
-            env: Optional[VecNormalize] = None,
+        self,
+        batch_inds: th.Tensor,
+        env: Optional[VecNormalize] = None,
     ) -> RolloutBufferSamples:
         data = (
             self.observations[batch_inds],
@@ -234,18 +258,22 @@ class DictRolloutBuffer(RolloutBuffer):
     observations: Dict[str, th.Tensor]  # type: ignore[assignment]
 
     def __init__(
-            self,
-            buffer_size: int,
-            observation_space: spaces.Dict,
-            action_space: spaces.Space,
-            device: Union[th.device, str] = "auto",
-            gae_lambda: float = 1,
-            gamma: float = 0.99,
-            n_envs: int = 1,
+        self,
+        buffer_size: int,
+        observation_space: spaces.Dict,
+        action_space: spaces.Space,
+        device: Union[th.device, str] = "auto",
+        gae_lambda: float = 1,
+        gamma: float = 0.99,
+        n_envs: int = 1,
     ):
-        super(RolloutBuffer, self).__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
+        super(RolloutBuffer, self).__init__(
+            buffer_size, observation_space, action_space, device, n_envs=n_envs
+        )
 
-        assert isinstance(self.obs_shape, dict), "DictRolloutBuffer must be used with Dict obs space only"
+        assert isinstance(
+            self.obs_shape, dict
+        ), "DictRolloutBuffer must be used with Dict obs space only"
 
         self.gae_lambda = gae_lambda
         self.gamma = gamma
@@ -256,11 +284,17 @@ class DictRolloutBuffer(RolloutBuffer):
     def reset(self) -> None:
         self.observations = {}
         for key, obs_ithut_shape in self.obs_shape.items():
-            self.observations[key] = th.zeros((self.buffer_size, self.n_envs, *obs_ithut_shape), dtype=th.float32)
-        self.actions = th.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=th.float32)
+            self.observations[key] = th.zeros(
+                (self.buffer_size, self.n_envs, *obs_ithut_shape), dtype=th.float32
+            )
+        self.actions = th.zeros(
+            (self.buffer_size, self.n_envs, self.action_dim), dtype=th.float32
+        )
         self.rewards = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
         self.returns = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
-        self.episode_starts = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
+        self.episode_starts = th.zeros(
+            (self.buffer_size, self.n_envs), dtype=th.float32
+        )
         self.values = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
         self.log_probs = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
         self.advantages = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
@@ -268,13 +302,13 @@ class DictRolloutBuffer(RolloutBuffer):
         super(RolloutBuffer, self).reset()
 
     def add(  # type: ignore[override]
-            self,
-            obs: Dict[str, th.Tensor],
-            action: th.Tensor,
-            reward: th.Tensor,
-            episode_start: th.Tensor,
-            value: th.Tensor,
-            log_prob: th.Tensor,
+        self,
+        obs: Dict[str, th.Tensor],
+        action: th.Tensor,
+        reward: th.Tensor,
+        episode_start: th.Tensor,
+        value: th.Tensor,
+        log_prob: th.Tensor,
     ) -> None:
         """
         :param obs: Observation
@@ -311,8 +345,8 @@ class DictRolloutBuffer(RolloutBuffer):
             self.full = True
 
     def get(  # type: ignore[override]
-            self,
-            batch_size: Optional[int] = None,
+        self,
+        batch_size: Optional[int] = None,
     ) -> Generator[DictRolloutBufferSamples, None, None]:
         assert self.full, ""
         indices = th.random.permutation(self.buffer_size * self.n_envs)
@@ -333,16 +367,19 @@ class DictRolloutBuffer(RolloutBuffer):
 
         start_idx = 0
         while start_idx < self.buffer_size * self.n_envs:
-            yield self._get_samples(indices[start_idx: start_idx + batch_size])
+            yield self._get_samples(indices[start_idx : start_idx + batch_size])
             start_idx += batch_size
 
     def _get_samples(  # type: ignore[override]
-            self,
-            batch_inds: th.Tensor,
-            env: Optional[VecNormalize] = None,
+        self,
+        batch_inds: th.Tensor,
+        env: Optional[VecNormalize] = None,
     ) -> DictRolloutBufferSamples:
         return DictRolloutBufferSamples(
-            observations={key: self.to_torch(obs[batch_inds]) for (key, obs) in self.observations.items()},
+            observations={
+                key: self.to_torch(obs[batch_inds])
+                for (key, obs) in self.observations.items()
+            },
             actions=self.to_torch(self.actions[batch_inds]),
             old_values=self.to_torch(self.values[batch_inds].flatten()),
             old_log_prob=self.to_torch(self.log_probs[batch_inds].flatten()),
@@ -379,16 +416,18 @@ class ReplayBuffer(BaseBuffer):
     timeouts: th.Tensor
 
     def __init__(
-            self,
-            buffer_size: int,
-            observation_space: spaces.Space,
-            action_space: spaces.Space,
-            device: Union[th.device, str] = "auto",
-            n_envs: int = 1,
-            optimize_memory_usage: bool = False,
-            handle_timeout_termination: bool = True,
+        self,
+        buffer_size: int,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        device: Union[th.device, str] = "auto",
+        n_envs: int = 1,
+        optimize_memory_usage: bool = False,
+        handle_timeout_termination: bool = True,
     ):
-        super().__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
+        super().__init__(
+            buffer_size, observation_space, action_space, device, n_envs=n_envs
+        )
 
         # Adjust buffer size
         self.buffer_size = max(buffer_size // n_envs, 1)
@@ -406,14 +445,21 @@ class ReplayBuffer(BaseBuffer):
             )
         self.optimize_memory_usage = optimize_memory_usage
 
-        self.observations = th.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=observation_space.dtype)
+        self.observations = th.zeros(
+            (self.buffer_size, self.n_envs, *self.obs_shape),
+            dtype=observation_space.dtype,
+        )
 
         if not optimize_memory_usage:
             # When optimizing memory, `observations` contains also the next observation
-            self.next_observations = th.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=observation_space.dtype)
+            self.next_observations = th.zeros(
+                (self.buffer_size, self.n_envs, *self.obs_shape),
+                dtype=observation_space.dtype,
+            )
 
         self.actions = th.zeros(
-            (self.buffer_size, self.n_envs, self.action_dim), dtype=self._maybe_cast_dtype(action_space.dtype)
+            (self.buffer_size, self.n_envs, self.action_dim),
+            dtype=self._maybe_cast_dtype(action_space.dtype),
         )
 
         self.rewards = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
@@ -425,7 +471,10 @@ class ReplayBuffer(BaseBuffer):
 
         if psutil is not None:
             total_memory_usage: float = (
-                    self.observations.nbytes + self.actions.nbytes + self.rewards.nbytes + self.dones.nbytes
+                self.observations.nbytes
+                + self.actions.nbytes
+                + self.rewards.nbytes
+                + self.dones.nbytes
             )
 
             if not optimize_memory_usage:
@@ -441,14 +490,14 @@ class ReplayBuffer(BaseBuffer):
                 )
 
     def add(
-            self,
-            obs: th.Tensor,
-            next_obs: th.Tensor,
-            action: th.Tensor,
-            reward: th.Tensor,
-            done: th.Tensor,
-            infos: List[Dict[str, Any]],
-            state: Optional[th.Tensor] = None,
+        self,
+        obs: th.Tensor,
+        next_obs: th.Tensor,
+        action: th.Tensor,
+        reward: th.Tensor,
+        done: th.Tensor,
+        infos: List[Dict[str, Any]],
+        state: Optional[th.Tensor] = None,
     ) -> None:
         # Reshape needed when using multiple envs with discrete observations
         # as numpy cannot broadcast (n_discrete,) to (n_discrete, 1)
@@ -463,7 +512,9 @@ class ReplayBuffer(BaseBuffer):
         self.observations[self.pos] = th.as_tensor(obs)
 
         if self.optimize_memory_usage:
-            self.observations[(self.pos + 1) % self.buffer_size] = th.as_tensor(next_obs)
+            self.observations[(self.pos + 1) % self.buffer_size] = th.as_tensor(
+                next_obs
+            )
         else:
             self.next_observations[self.pos] = th.as_tensor(next_obs)
 
@@ -472,14 +523,18 @@ class ReplayBuffer(BaseBuffer):
         self.dones[self.pos] = th.as_tensor(done)
 
         if self.handle_timeout_termination:
-            self.timeouts[self.pos] = th.as_tensor([info.get("TimeLimit.truncated", False) for info in infos])
+            self.timeouts[self.pos] = th.as_tensor(
+                [info.get("TimeLimit.truncated", False) for info in infos]
+            )
 
         self.pos += 1
         if self.pos == self.buffer_size:
             self.full = True
             self.pos = 0
 
-    def sample(self, batch_size: int, env: Optional[VecNormalize] = None) -> ReplayBufferSamples:
+    def sample(
+        self, batch_size: int, env: Optional[VecNormalize] = None
+    ) -> ReplayBufferSamples:
         """
         Sample elements from the replay buffer.
         Custom sampling when using memory efficient variant,
@@ -496,19 +551,28 @@ class ReplayBuffer(BaseBuffer):
         # Do not sample the element with index `self.pos` as the transitions is invalid
         # (we use only one array to store `obs` and `next_obs`)
         if self.full:
-            batch_inds = (th.random.randint(1, self.buffer_size, size=batch_size) + self.pos) % self.buffer_size
+            batch_inds = (
+                th.random.randint(1, self.buffer_size, size=batch_size) + self.pos
+            ) % self.buffer_size
         else:
             batch_inds = th.random.randint(0, self.pos, size=batch_size)
         return self._get_samples(batch_inds, env=env)
 
-    def _get_samples(self, batch_inds: th.Tensor, env: Optional[VecNormalize] = None) -> ReplayBufferSamples:
+    def _get_samples(
+        self, batch_inds: th.Tensor, env: Optional[VecNormalize] = None
+    ) -> ReplayBufferSamples:
         # Sample randomly the env idx
         env_indices = th.random.randint(0, high=self.n_envs, size=(len(batch_inds),))
 
         if self.optimize_memory_usage:
-            next_obs = self._normalize_obs(self.observations[(batch_inds + 1) % self.buffer_size, env_indices, :], env)
+            next_obs = self._normalize_obs(
+                self.observations[(batch_inds + 1) % self.buffer_size, env_indices, :],
+                env,
+            )
         else:
-            next_obs = self._normalize_obs(self.next_observations[batch_inds, env_indices, :], env)
+            next_obs = self._normalize_obs(
+                self.next_observations[batch_inds, env_indices, :], env
+            )
 
         data = (
             self._normalize_obs(self.observations[batch_inds, env_indices, :], env),
@@ -516,8 +580,13 @@ class ReplayBuffer(BaseBuffer):
             next_obs,
             # Only use dones that are not due to timeouts
             # deactivated by default (timeouts is initialized as an array of False)
-            (self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices])).reshape(-1, 1),
-            self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env),
+            (
+                self.dones[batch_inds, env_indices]
+                * (1 - self.timeouts[batch_inds, env_indices])
+            ).reshape(-1, 1),
+            self._normalize_reward(
+                self.rewards[batch_inds, env_indices].reshape(-1, 1), env
+            ),
         )
         return ReplayBufferSamples(*tuple(map(self.to_torch, data)))
 
@@ -560,40 +629,53 @@ class DictReplayBuffer(ReplayBuffer):
     next_observations: Dict[str, th.Tensor]  # type: ignore[assignment]
 
     def __init__(
-            self,
-            buffer_size: int,
-            observation_space: spaces.Dict,
-            action_space: spaces.Space,
-            device: Union[th.device, str] = "auto",
-            n_envs: int = 1,
-            optimize_memory_usage: bool = False,
-            handle_timeout_termination: bool = True,
+        self,
+        buffer_size: int,
+        observation_space: spaces.Dict,
+        action_space: spaces.Space,
+        device: Union[th.device, str] = "auto",
+        n_envs: int = 1,
+        optimize_memory_usage: bool = False,
+        handle_timeout_termination: bool = True,
     ):
-        super(ReplayBuffer, self).__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
+        super(ReplayBuffer, self).__init__(
+            buffer_size, observation_space, action_space, device, n_envs=n_envs
+        )
 
-        assert isinstance(self.obs_shape, dict), "DictReplayBuffer must be used with Dict obs space only"
+        assert isinstance(
+            self.obs_shape, dict
+        ), "DictReplayBuffer must be used with Dict obs space only"
         self.buffer_size = max(buffer_size // n_envs, 1)
 
         # Check that the replay buffer can fit into the memory
         if psutil is not None:
             mem_available = psutil.virtual_memory().available
 
-        assert not optimize_memory_usage, "DictReplayBuffer does not support optimize_memory_usage"
+        assert (
+            not optimize_memory_usage
+        ), "DictReplayBuffer does not support optimize_memory_usage"
         # disabling as this adds quite a bit of complexity
         # https://github.com/DLR-RM/stable-baselines3/pull/243#discussion_r531535702
         self.optimize_memory_usage = optimize_memory_usage
 
         self.observations = {
-            key: th.zeros((self.buffer_size, self.n_envs, *_obs_shape), dtype=observation_space[key].dtype)
+            key: th.zeros(
+                (self.buffer_size, self.n_envs, *_obs_shape),
+                dtype=observation_space[key].dtype,
+            )
             for key, _obs_shape in self.obs_shape.items()
         }
         self.next_observations = {
-            key: th.zeros((self.buffer_size, self.n_envs, *_obs_shape), dtype=observation_space[key].dtype)
+            key: th.zeros(
+                (self.buffer_size, self.n_envs, *_obs_shape),
+                dtype=observation_space[key].dtype,
+            )
             for key, _obs_shape in self.obs_shape.items()
         }
 
         self.actions = th.zeros(
-            (self.buffer_size, self.n_envs, self.action_dim), dtype=self._maybe_cast_dtype(action_space.dtype)
+            (self.buffer_size, self.n_envs, self.action_dim),
+            dtype=self._maybe_cast_dtype(action_space.dtype),
         )
         self.rewards = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
         self.dones = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
@@ -608,7 +690,12 @@ class DictReplayBuffer(ReplayBuffer):
             for _, obs in self.observations.items():
                 obs_nbytes += obs.nbytes
 
-            total_memory_usage: float = obs_nbytes + self.actions.nbytes + self.rewards.nbytes + self.dones.nbytes
+            total_memory_usage: float = (
+                obs_nbytes
+                + self.actions.nbytes
+                + self.rewards.nbytes
+                + self.dones.nbytes
+            )
             if not optimize_memory_usage:
                 next_obs_nbytes = 0
                 for _, obs in self.observations.items():
@@ -625,14 +712,14 @@ class DictReplayBuffer(ReplayBuffer):
                 )
 
     def add(  # type: ignore[override]
-            self,
-            obs: Dict[str, th.Tensor],
-            next_obs: Dict[str, th.Tensor],
-            action: th.Tensor,
-            reward: th.Tensor,
-            done: th.Tensor,
-            infos: List[Dict[str, Any]],
-            state: Optional[th.Tensor] = None,
+        self,
+        obs: Dict[str, th.Tensor],
+        next_obs: Dict[str, th.Tensor],
+        action: th.Tensor,
+        reward: th.Tensor,
+        done: th.Tensor,
+        infos: List[Dict[str, Any]],
+        state: Optional[th.Tensor] = None,
     ) -> None:
         # Copy to avoid modification by reference
         for key in self.observations.keys():
@@ -644,7 +731,9 @@ class DictReplayBuffer(ReplayBuffer):
 
         for key in self.next_observations.keys():
             if isinstance(self.observation_space.spaces[key], spaces.Discrete):
-                next_obs[key] = next_obs[key].reshape((self.n_envs,) + self.obs_shape[key])
+                next_obs[key] = next_obs[key].reshape(
+                    (self.n_envs,) + self.obs_shape[key]
+                )
             self.next_observations[key][self.pos] = th.as_tensor(next_obs[key])
 
         # Reshape to handle multi-dim and discrete action spaces, see GH #970 #1392
@@ -655,7 +744,9 @@ class DictReplayBuffer(ReplayBuffer):
         self.dones[self.pos] = th.as_tensor(done)
 
         if self.handle_timeout_termination:
-            self.timeouts[self.pos] = th.as_tensor([info.get("TimeLimit.truncated", False) for info in infos])
+            self.timeouts[self.pos] = th.as_tensor(
+                [info.get("TimeLimit.truncated", False) for info in infos]
+            )
 
         self.pos += 1
         if self.pos == self.buffer_size:
@@ -663,9 +754,9 @@ class DictReplayBuffer(ReplayBuffer):
             self.pos = 0
 
     def sample(  # type: ignore[override]
-            self,
-            batch_size: int,
-            env: Optional[VecNormalize] = None,
+        self,
+        batch_size: int,
+        env: Optional[VecNormalize] = None,
     ) -> DictReplayBufferSamples:
         """
         Sample elements from the replay buffer.
@@ -678,17 +769,27 @@ class DictReplayBuffer(ReplayBuffer):
         return super(ReplayBuffer, self).sample(batch_size=batch_size, env=env)
 
     def _get_samples(  # type: ignore[override]
-            self,
-            batch_inds: th.Tensor,
-            env: Optional[VecNormalize] = None,
+        self,
+        batch_inds: th.Tensor,
+        env: Optional[VecNormalize] = None,
     ) -> DictReplayBufferSamples:
         # Sample randomly the env idx
         env_indices = th.random.randint(0, high=self.n_envs, size=(len(batch_inds),))
 
         # Normalize if needed and remove extra dimension (we are using only one env for now)
-        obs_ = self._normalize_obs({key: obs[batch_inds, env_indices, :] for key, obs in self.observations.items()}, env)
+        obs_ = self._normalize_obs(
+            {
+                key: obs[batch_inds, env_indices, :]
+                for key, obs in self.observations.items()
+            },
+            env,
+        )
         next_obs_ = self._normalize_obs(
-            {key: obs[batch_inds, env_indices, :] for key, obs in self.next_observations.items()}, env
+            {
+                key: obs[batch_inds, env_indices, :]
+                for key, obs in self.next_observations.items()
+            },
+            env,
         )
 
         assert isinstance(obs_, dict)
@@ -703,10 +804,15 @@ class DictReplayBuffer(ReplayBuffer):
             next_observations=next_observations,
             # Only use dones that are not due to timeouts
             # deactivated by default (timeouts is initialized as an array of False)
-            dones=self.to_torch(self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices])).reshape(
-                -1, 1
+            dones=self.to_torch(
+                self.dones[batch_inds, env_indices]
+                * (1 - self.timeouts[batch_inds, env_indices])
+            ).reshape(-1, 1),
+            rewards=self.to_torch(
+                self._normalize_reward(
+                    self.rewards[batch_inds, env_indices].reshape(-1, 1), env
+                )
             ),
-            rewards=self.to_torch(self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env)),
         )
 
 
@@ -742,40 +848,53 @@ class FullDictReplayBuffer(DictReplayBuffer):
     next_observations: Dict[str, th.Tensor]  # type: ignore[assignment]
 
     def __init__(
-            self,
-            buffer_size: int,
-            observation_space: spaces.Dict,
-            action_space: spaces.Space,
-            device: Union[th.device, str] = "auto",
-            n_envs: int = 1,
-            optimize_memory_usage: bool = False,
-            handle_timeout_termination: bool = True,
+        self,
+        buffer_size: int,
+        observation_space: spaces.Dict,
+        action_space: spaces.Space,
+        device: Union[th.device, str] = "auto",
+        n_envs: int = 1,
+        optimize_memory_usage: bool = False,
+        handle_timeout_termination: bool = True,
     ):
-        super(ReplayBuffer, self).__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
+        super(ReplayBuffer, self).__init__(
+            buffer_size, observation_space, action_space, device, n_envs=n_envs
+        )
         self.states = th.zeros((self.buffer_size, n_envs, 22), dtype=th.float32)
-        assert isinstance(self.obs_shape, dict), "DictReplayBuffer must be used with Dict obs space only"
+        assert isinstance(
+            self.obs_shape, dict
+        ), "DictReplayBuffer must be used with Dict obs space only"
         self.buffer_size = max(buffer_size // n_envs, 1)
 
         # Check that the replay buffer can fit into the memory
         if psutil is not None:
             mem_available = psutil.virtual_memory().available
 
-        assert not optimize_memory_usage, "DictReplayBuffer does not support optimize_memory_usage"
+        assert (
+            not optimize_memory_usage
+        ), "DictReplayBuffer does not support optimize_memory_usage"
         # disabling as this adds quite a bit of complexity
         # https://github.com/DLR-RM/stable-baselines3/pull/243#discussion_r531535702
         self.optimize_memory_usage = optimize_memory_usage
 
         self.observations = {
-            key: th.zeros((self.buffer_size, self.n_envs, *_obs_shape), dtype=numpy_to_torch_dtype(observation_space[key].dtype))
+            key: th.zeros(
+                (self.buffer_size, self.n_envs, *_obs_shape),
+                dtype=numpy_to_torch_dtype(observation_space[key].dtype),
+            )
             for key, _obs_shape in self.obs_shape.items()
         }
         self.next_observations = {
-            key: th.zeros((self.buffer_size, self.n_envs, *_obs_shape), dtype=numpy_to_torch_dtype(observation_space[key].dtype))
+            key: th.zeros(
+                (self.buffer_size, self.n_envs, *_obs_shape),
+                dtype=numpy_to_torch_dtype(observation_space[key].dtype),
+            )
             for key, _obs_shape in self.obs_shape.items()
         }
 
         self.actions = th.zeros(
-            (self.buffer_size, self.n_envs, self.action_dim), dtype=numpy_to_torch_dtype(self._maybe_cast_dtype(action_space.dtype))
+            (self.buffer_size, self.n_envs, self.action_dim),
+            dtype=numpy_to_torch_dtype(self._maybe_cast_dtype(action_space.dtype)),
         )
         self.rewards = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
         self.dones = th.zeros((self.buffer_size, self.n_envs), dtype=th.float32)
@@ -790,7 +909,12 @@ class FullDictReplayBuffer(DictReplayBuffer):
             for _, obs in self.observations.items():
                 obs_nbytes += obs.nbytes
 
-            total_memory_usage: float = obs_nbytes + self.actions.nbytes + self.rewards.nbytes + self.dones.nbytes
+            total_memory_usage: float = (
+                obs_nbytes
+                + self.actions.nbytes
+                + self.rewards.nbytes
+                + self.dones.nbytes
+            )
             if not optimize_memory_usage:
                 next_obs_nbytes = 0
                 for _, obs in self.observations.items():
@@ -807,14 +931,14 @@ class FullDictReplayBuffer(DictReplayBuffer):
                 )
 
     def add(  # type: ignore[override]
-            self,
-            obs: Dict[str, th.Tensor],
-            next_obs: Dict[str, th.Tensor],
-            action: th.Tensor,
-            reward: th.Tensor,
-            done: th.Tensor,
-            infos: List[Dict[str, Any]],
-            state: Optional[th.Tensor] = None,
+        self,
+        obs: Dict[str, th.Tensor],
+        next_obs: Dict[str, th.Tensor],
+        action: th.Tensor,
+        reward: th.Tensor,
+        done: th.Tensor,
+        infos: List[Dict[str, Any]],
+        state: Optional[th.Tensor] = None,
     ) -> None:
         self.states[self.pos] = th.as_tensor(state)
 
@@ -828,9 +952,9 @@ class FullDictReplayBuffer(DictReplayBuffer):
         )
 
     def sample(  # type: ignore[override]
-            self,
-            batch_size: int,
-            env: Optional[VecNormalize] = None,
+        self,
+        batch_size: int,
+        env: Optional[VecNormalize] = None,
     ) -> FullDictReplayBufferSamples:
         """
         Sample elements from the replay buffer.
@@ -843,17 +967,27 @@ class FullDictReplayBuffer(DictReplayBuffer):
         return super(ReplayBuffer, self).sample(batch_size=batch_size, env=env)
 
     def _get_samples(  # type: ignore[override]
-            self,
-            batch_inds: th.Tensor,
-            env: Optional[VecNormalize] = None,
+        self,
+        batch_inds: th.Tensor,
+        env: Optional[VecNormalize] = None,
     ) -> DictReplayBufferSamples:
         # Sample randomly the env idx
         env_indices = th.randint(0, high=self.n_envs, size=(len(batch_inds),))
 
         # Normalize if needed and remove extra dimension (we are using only one env for now)
-        obs_ = self._normalize_obs({key: obs[batch_inds, env_indices, :] for key, obs in self.observations.items()}, env)
+        obs_ = self._normalize_obs(
+            {
+                key: obs[batch_inds, env_indices, :]
+                for key, obs in self.observations.items()
+            },
+            env,
+        )
         next_obs_ = self._normalize_obs(
-            {key: obs[batch_inds, env_indices, :] for key, obs in self.next_observations.items()}, env
+            {
+                key: obs[batch_inds, env_indices, :]
+                for key, obs in self.next_observations.items()
+            },
+            env,
         )
 
         assert isinstance(obs_, dict)
@@ -868,10 +1002,15 @@ class FullDictReplayBuffer(DictReplayBuffer):
             next_observations=next_observations,
             # Only use dones that are not due to timeouts
             # deactivated by default (timeouts is initialized as an array of False)
-            dones=self.to_torch(self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices])).reshape(
-                -1, 1
+            dones=self.to_torch(
+                self.dones[batch_inds, env_indices]
+                * (1 - self.timeouts[batch_inds, env_indices])
+            ).reshape(-1, 1),
+            rewards=self.to_torch(
+                self._normalize_reward(
+                    self.rewards[batch_inds, env_indices].reshape(-1, 1), env
+                )
             ),
-            rewards=self.to_torch(self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env)),
             states=self.to_torch(self.states[batch_inds, env_indices]),
         )
 
@@ -893,7 +1032,9 @@ class FullDictReplayBuffer(DictReplayBuffer):
 def compute_td_returns(r, done, next_value, episode_done=None, gamma=0.99, lamda=0.95):
     h = len(r)
     num_envs = r[0].shape[0]  # 环境数量
-    returns = [th.zeros(num_envs, dtype=th.float32) for _ in range(h)]  # 初始化返回值列表
+    returns = [
+        th.zeros(num_envs, dtype=th.float32) for _ in range(h)
+    ]  # 初始化返回值列表
     episode_done = done if episode_done is None else episode_done
 
     # 初始化 Ai、Bi 和 lam
@@ -911,7 +1052,9 @@ def compute_td_returns(r, done, next_value, episode_done=None, gamma=0.99, lamda
 
         # 更新 Ai
         Ai = active * (
-                lamda * gamma * Ai + gamma * next_value[t] + ((1.0 - lam) / (1.0 - lamda)) * r[t]
+            lamda * gamma * Ai
+            + gamma * next_value[t]
+            + ((1.0 - lam) / (1.0 - lamda)) * r[t]
         )
 
         # 更新 Bi
@@ -947,9 +1090,9 @@ class RLBuffer:
 
 class DataBuffer2:
     def __init__(
-            self,
-            length,
-            batch_size,
+        self,
+        length,
+        batch_size,
     ):
         self.length = int(length)
         self.batch_size = int(batch_size)
@@ -976,7 +1119,13 @@ class DataBuffer2:
         elif len(self.done) == self.length:
             available_index = th.where(data[5])[0]
             new_data_len = len(available_index)
-            index = th.arange(self._current_update_index, self._current_update_index + new_data_len) % self.length
+            index = (
+                th.arange(
+                    self._current_update_index,
+                    self._current_update_index + new_data_len,
+                )
+                % self.length
+            )
             self._current_update_index = (index[-1] + 1) % self.length
             self.obs[index] = data[0][available_index]
             self.reward[index] = data[1][available_index]
@@ -997,20 +1146,28 @@ class DataBuffer2:
             # self.value = th.cat([self.value, data[6][available_index]])
 
             if free_length < len(available_index):
-                self.append((
-                    data[0][available_index[free_length:]],
-                    data[1][available_index[free_length:]],
-                    data[2][available_index[free_length:]],
-                    data[3][available_index[free_length:]],
-                    data[4][available_index[free_length:]],
-                    data[5][available_index[free_length:]],
-                    # data[6][available_index[free_length:]],
-                ))
+                self.append(
+                    (
+                        data[0][available_index[free_length:]],
+                        data[1][available_index[free_length:]],
+                        data[2][available_index[free_length:]],
+                        data[3][available_index[free_length:]],
+                        data[4][available_index[free_length:]],
+                        data[5][available_index[free_length:]],
+                        # data[6][available_index[free_length:]],
+                    )
+                )
 
     def sample(self):
         assert self.sample_available
         index = random.sample(range(len(self)), self.batch_size)
-        return self.obs[index], self.reward[index], self.action[index], self.next_obs[index], self.done[index]
+        return (
+            self.obs[index],
+            self.reward[index],
+            self.action[index],
+            self.next_obs[index],
+            self.done[index],
+        )
 
     def __len__(self):
         return len(self.done)
@@ -1041,16 +1198,7 @@ class DataBuffer3(DataBuffer2):
 
     # self.replay_buffer.append((pre_obs.clone().detach(), reward.clone().detach(), clipped_actions.clone().detach(), obs.clone().detach(), done, pre_active))
 
-    def add(
-            self,
-            pre_obs,
-            reward,
-            action,
-            obs,
-            done,
-            next_value,
-            pre_active
-    ):
+    def add(self, pre_obs, reward, action, obs, done, next_value, pre_active):
         self._cache_buffer.pre_obs.append(pre_obs)
         self._cache_buffer.reward.append(reward)
         self._cache_buffer.action.append(action)
@@ -1060,20 +1208,24 @@ class DataBuffer3(DataBuffer2):
         self._cache_buffer.pre_active.append(pre_active)
 
     def release(self):
-        returns = compute_td_returns(r=self._cache_buffer.reward,
-                                     done=self._cache_buffer.done,
-                                     next_value=self._cache_buffer.next_value,
-                                     gamma=self.gamma)
+        returns = compute_td_returns(
+            r=self._cache_buffer.reward,
+            done=self._cache_buffer.done,
+            next_value=self._cache_buffer.next_value,
+            gamma=self.gamma,
+        )
         for i in range(len(returns)):
-            self.append((
-                self._cache_buffer.pre_obs[i],
-                self._cache_buffer.reward[i],
-                self._cache_buffer.action[i],
-                self._cache_buffer.obs[i],
-                self._cache_buffer.done[i],
-                self._cache_buffer.pre_active[i],
-                returns[i]
-            ))
+            self.append(
+                (
+                    self._cache_buffer.pre_obs[i],
+                    self._cache_buffer.reward[i],
+                    self._cache_buffer.action[i],
+                    self._cache_buffer.obs[i],
+                    self._cache_buffer.done[i],
+                    self._cache_buffer.pre_active[i],
+                    returns[i],
+                )
+            )
         self._cache_buffer.clear()
 
     def append(self, data):
@@ -1090,7 +1242,13 @@ class DataBuffer3(DataBuffer2):
         elif len(self.done) == self.length:
             available_index = th.where(data[5])[0]
             new_data_len = len(available_index)
-            index = th.arange(self._current_update_index, self._current_update_index + new_data_len) % self.length
+            index = (
+                th.arange(
+                    self._current_update_index,
+                    self._current_update_index + new_data_len,
+                )
+                % self.length
+            )
             self._current_update_index = (index[-1] + 1) % self.length
             self.obs[index] = data[0][available_index]
             self.reward[index] = data[1][available_index]
@@ -1111,20 +1269,29 @@ class DataBuffer3(DataBuffer2):
             self.returns = th.cat([self.returns, data[6][available_index]])
 
             if free_length < len(available_index):
-                self.append((
-                    data[0][available_index[free_length:]],
-                    data[1][available_index[free_length:]],
-                    data[2][available_index[free_length:]],
-                    data[3][available_index[free_length:]],
-                    data[4][available_index[free_length:]],
-                    data[5][available_index[free_length:]],
-                    data[6][available_index[free_length:]],
-                ))
+                self.append(
+                    (
+                        data[0][available_index[free_length:]],
+                        data[1][available_index[free_length:]],
+                        data[2][available_index[free_length:]],
+                        data[3][available_index[free_length:]],
+                        data[4][available_index[free_length:]],
+                        data[5][available_index[free_length:]],
+                        data[6][available_index[free_length:]],
+                    )
+                )
 
     def sample(self):
         assert self.sample_available
         index = random.sample(range(len(self)), self.batch_size)
-        return self.obs[index], self.reward[index], self.action[index], self.next_obs[index], self.done[index], self.returns[index]
+        return (
+            self.obs[index],
+            self.reward[index],
+            self.action[index],
+            self.next_obs[index],
+            self.done[index],
+            self.returns[index],
+        )
 
     @property
     def len_cache(self):
@@ -1137,12 +1304,11 @@ class DataBuffer3(DataBuffer2):
 
 class DataBuffer:
     def __init__(
-            self,
-            length,
-            batch_size,
-            shuffle=True,
-            dtype=tuple,
-
+        self,
+        length,
+        batch_size,
+        shuffle=True,
+        dtype=tuple,
     ):
         self.length = int(length)
         self.buffer = deque(
@@ -1166,7 +1332,9 @@ class DataBuffer:
 
             pre_obs = {}
             for key in pre_obs_list[0].keys():
-                pre_obs[key] = th.stack([each_pre_obs_list[key] for each_pre_obs_list in pre_obs_list])
+                pre_obs[key] = th.stack(
+                    [each_pre_obs_list[key] for each_pre_obs_list in pre_obs_list]
+                )
             obs = {}
             for key in obs_list[0].keys():
                 obs[key] = th.stack([each_obs_list[key] for each_obs_list in obs_list])
@@ -1177,7 +1345,7 @@ class DataBuffer:
 
     def append(self, data):
         """
-            data: s, r, a, s', d, pre_active
+        data: s, r, a, s', d, pre_active
         """
         for i in range(len(data[-1])):
             if data[-1][i]:
@@ -1196,10 +1364,7 @@ class DataBuffer:
 
 
 class SimpleRolloutBuffer:
-    def __init__(
-            self,
-            gamma
-    ):
+    def __init__(self, gamma):
         self.gamma = gamma
         self.reward = []
         self.action = []
@@ -1235,7 +1400,7 @@ class SimpleRolloutBuffer:
             done=self.done,
             next_value=self.value,
             episode_done=self.episode_done,
-            gamma=0.99
+            gamma=0.99,
         )
         self.flatten()
 
@@ -1247,4 +1412,3 @@ class SimpleRolloutBuffer:
         self.done = th.vstack(self.done).flatten()
         self.episode_done = th.vstack(self.episode_done).flatten()
         self.returns = th.vstack(self.returns).flatten()
-

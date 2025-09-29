@@ -1,14 +1,21 @@
 from typing import Optional, Union, List, Type, Dict, Any
 
 from gym.vector.utils import spaces
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, FlattenExtractor, CombinedExtractor
+from stable_baselines3.common.torch_layers import (
+    BaseFeaturesExtractor,
+    FlattenExtractor,
+    CombinedExtractor,
+)
 from stable_baselines3.common.type_aliases import Schedule
 from stable_baselines3.sac.policies import SACPolicy as sb_SACPolicy
-from stable_baselines3.sac.policies import MultiInputPolicy as sb_MultiInputPolicy
 from torch import nn
 import torch as th
-from .extractors import StateExtractor, StateTargetExtractor, StateImageExtractor, StateTargetImageExtractor
-
+from .extractors import (
+    StateExtractor,
+    StateTargetExtractor,
+    StateImageExtractor,
+    StateTargetImageExtractor,
+)
 
 
 class SACPolicy(sb_SACPolicy):
@@ -45,7 +52,9 @@ class SACPolicy(sb_SACPolicy):
         share_features_extractor: bool = False,
     ):
         if isinstance(features_extractor_class, str):
-            features_extractor_class = self.features_extractor_alias[features_extractor_class]
+            features_extractor_class = self.features_extractor_alias[
+                features_extractor_class
+            ]
 
         if isinstance(activation_fn, str):
             activation_fn = self.activation_fn_alias[activation_fn]
@@ -68,6 +77,7 @@ class SACPolicy(sb_SACPolicy):
             n_critics=n_critics,
             share_features_extractor=share_features_extractor,
         )
+
 
 class MultiInputPolicy(SACPolicy):
     """

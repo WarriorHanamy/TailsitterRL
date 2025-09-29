@@ -360,7 +360,6 @@ class TailsitterEnvsBase(VecEnv):
             scene_indices if scene_indices is not None else torch.arange(self.num_scene)
         )
         scene_indices = torch.atleast_1d(scene_indices)
-        self.envs.reset_scenes(scene_indices)
         agent_indices = (
             (
                 torch.tile(
@@ -369,6 +368,7 @@ class TailsitterEnvsBase(VecEnv):
                 + (scene_indices.unsqueeze(1) * self.num_agent_per_scene)
             ).reshape(-1, 1)
         ).flatten()
+        self.envs.reset_agents(agent_indices)
         self._reset_attr(indices=agent_indices)
         return self.get_full_observation(agent_indices)
 

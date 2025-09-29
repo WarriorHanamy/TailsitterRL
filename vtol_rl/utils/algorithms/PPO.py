@@ -1,7 +1,7 @@
 import io
 import pathlib
 
-from stable_baselines3.common.save_util import load_from_zip_file, recursive_setattr
+from stable_baselines3.common.save_util import load_from_zip_file
 from stable_baselines3.common.utils import safe_mean
 from tqdm import tqdm
 import os
@@ -25,32 +25,35 @@ from stable_baselines3.common.policies import (
 
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar, Union
 
 import numpy as np
 import torch as th
 from gymnasium import spaces
 
-from stable_baselines3.common.policies import ActorCriticPolicy
-from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule, TrainFreq, TrainFrequencyUnit
+from stable_baselines3.common.type_aliases import (
+    GymEnv,
+    MaybeCallback,
+    TrainFreq,
+    TrainFrequencyUnit,
+)
 
-from stable_baselines3.common.preprocessing import check_for_nested_spaces, is_image_space, is_image_space_channels_first
+from stable_baselines3.common.preprocessing import (
+    check_for_nested_spaces,
+    is_image_space,
+    is_image_space_channels_first,
+)
 from stable_baselines3.common.env_util import is_wrapped
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env.patch_gym import _convert_space, _patch_env
 from ..policies.policies import CustomMultiInputActorCriticPolicy
 from stable_baselines3.ppo.ppo import PPO as ori_PPO
-from tqdm import tqdm
 
 from stable_baselines3.common.vec_env import (
     DummyVecEnv,
     VecEnv,
-    VecNormalize,
     VecTransposeImage,
     is_vecenv_wrapped,
-    unwrap_vec_normalize,
 )
-
 
 
 SelfPPO = TypeVar("SelfPPO", bound="PPO")
@@ -69,7 +72,9 @@ class PPO(ori_PPO):
         self.name = "PPO"
         self.scene_freq = scene_freq
         if self.scene_freq and not isinstance(self.scene_freq, TrainFreq):
-            Warning(f"scene_freq should be a TrainFreq, got {self.scene_freq}, converting to TrainFreq(1000000, TrainFrequencyUnit.STEP)")
+            Warning(
+                f"scene_freq should be a TrainFreq, got {self.scene_freq}, converting to TrainFreq(1000000, TrainFrequencyUnit.STEP)"
+            )
             self.scene_freq = TrainFreq(self.scene_freq, TrainFrequencyUnit.STEP)
 
         root = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -103,15 +108,22 @@ class PPO(ori_PPO):
             self._pre_scene_fresh_step = 0
         if self.scene_freq:
             if self.scene_freq.unit == TrainFrequencyUnit.EPISODE:
-                if self._episode_num - self._pre_scene_fresh_step >= self.scene_freq.frequency:
+                if (
+                    self._episode_num - self._pre_scene_fresh_step
+                    >= self.scene_freq.frequency
+                ):
                     print(f"Resetting scene at episode {self._episode_num}")
                     self.env.reset_env_by_id()
                     self._pre_scene_fresh_step = self._episode_num
             elif self.scene_freq.unit == TrainFrequencyUnit.STEP:
-                if self.num_timesteps - self._pre_scene_fresh_step >= self.scene_freq.frequency:
+                if (
+                    self.num_timesteps - self._pre_scene_fresh_step
+                    >= self.scene_freq.frequency
+                ):
                     print(f"Resetting scene at step {self.num_timesteps}")
                     self.env.reset_env_by_id()
                     self._pre_scene_fresh_step = self.num_timesteps
+
     def learn(
         self,
         total_timesteps: int,
@@ -120,7 +132,7 @@ class PPO(ori_PPO):
         tb_log_name: str = "PPO",
         reset_num_timesteps: bool = True,
         progress_bar: bool = False,
-    ) :
+    ):
         iteration = 0
         tb_log_name = self.save_path
         total_timesteps, callback = self._setup_learn(
@@ -142,21 +154,30 @@ class PPO(ori_PPO):
             while self.num_timesteps < total_timesteps:
                 self.check_and_reset_scene()
                 prev_timesteps = self.num_timesteps
-                continue_training = self.collect_rollouts(self.env, callback, self.rollout_buffer, n_rollout_steps=self.n_steps)
+                continue_training = self.collect_rollouts(
+                    self.env,
+                    callback,
+                    self.rollout_buffer,
+                    n_rollout_steps=self.n_steps,
+                )
 
                 if not continue_training:
                     break
 
                 iteration += 1
-                self._update_current_progress_remaining(self.num_timesteps, total_timesteps)
+                self._update_current_progress_remaining(
+                    self.num_timesteps, total_timesteps
+                )
 
                 # 更新进度条
                 steps_collected = self.num_timesteps - prev_timesteps
                 pbar.update(steps_collected)
-                pbar.set_postfix({
-                    'iteration': iteration,
-                    'timesteps': f'{self.num_timesteps}/{total_timesteps}'
-                })
+                pbar.set_postfix(
+                    {
+                        "iteration": iteration,
+                        "timesteps": f"{self.num_timesteps}/{total_timesteps}",
+                    }
+                )
 
                 # Display training infos
                 if log_interval is not None and iteration % log_interval == 0:
@@ -215,7 +236,7 @@ class PPO(ori_PPO):
                 # Normalization does not make sense if mini batchsize == 1, see GH issue #325
                 if self.normalize_advantage and len(advantages) > 1:
                     advantages = (advantages - advantages.mean()) / (
-                            advantages.std() + 1e-8
+                        advantages.std() + 1e-8
                     )
 
                 # ratio between old and new policy, should be one at the first iteration
@@ -256,9 +277,9 @@ class PPO(ori_PPO):
                 entropy_losses.append(entropy_loss.item())
 
                 loss = (
-                        policy_loss
-                        + self.ent_coef * entropy_loss
-                        + self.vf_coef * value_loss
+                    policy_loss
+                    + self.ent_coef * entropy_loss
+                    + self.vf_coef * value_loss
                 )
 
                 # Calculate approximate form of reverse KL Divergence for early stopping
@@ -335,7 +356,9 @@ class PPO(ori_PPO):
             self.logger.record("train/clip_range_vf", clip_range_vf)
 
     @staticmethod
-    def _wrap_env(env: GymEnv, verbose: int = 0, monitor_wrapper: bool = True) -> VecEnv:
+    def _wrap_env(
+        env: GymEnv, verbose: int = 0, monitor_wrapper: bool = True
+    ) -> VecEnv:
         """ "
         Wrap environment with the appropriate wrappers if needed.
         For instance, to have a vectorized environment
@@ -369,10 +392,13 @@ class PPO(ori_PPO):
                 # the other channel last), VecTransposeImage will throw an error
                 for space in env.observation_space.spaces.values():
                     wrap_with_vectranspose = wrap_with_vectranspose or (
-                            is_image_space(space) and not is_image_space_channels_first(space)  # type: ignore[arg-type]
+                        is_image_space(space)
+                        and not is_image_space_channels_first(space)  # type: ignore[arg-type]
                     )
             else:
-                wrap_with_vectranspose = is_image_space(env.observation_space) and not is_image_space_channels_first(
+                wrap_with_vectranspose = is_image_space(
+                    env.observation_space
+                ) and not is_image_space_channels_first(
                     env.observation_space  # type: ignore[arg-type]
                 )
 
@@ -390,12 +416,20 @@ class PPO(ori_PPO):
         assert self.ep_info_buffer is not None
         assert self.ep_success_buffer is not None
 
-        time_elapsed = max((time.time_ns() - self.start_time) / 1e9, sys.float_info.epsilon)
+        time_elapsed = max(
+            (time.time_ns() - self.start_time) / 1e9, sys.float_info.epsilon
+        )
         fps = int((self.num_timesteps - self._num_timesteps_at_start) / time_elapsed)
         self.logger.record("time/episodes", self._episode_num, exclude="tensorboard")
         if len(self.ep_info_buffer) > 0 and len(self.ep_info_buffer[0]) > 0:
-            self.logger.record("rollout/ep_rew_mean", safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]))
-            self.logger.record("rollout/ep_len_mean", safe_mean([ep_info["l"] for ep_info in self.ep_info_buffer]))
+            self.logger.record(
+                "rollout/ep_rew_mean",
+                safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]),
+            )
+            self.logger.record(
+                "rollout/ep_len_mean",
+                safe_mean([ep_info["l"] for ep_info in self.ep_info_buffer]),
+            )
 
             if len(self.ep_info_buffer[0]["extra"]) >= 0:
                 for key in self.ep_info_buffer[0]["extra"].keys():
@@ -406,17 +440,23 @@ class PPO(ori_PPO):
                         ),
                     )
         self.logger.record("time/fps", fps)
-        self.logger.record("time/time_elapsed", int(time_elapsed), exclude="tensorboard")
-        self.logger.record("time/total_timesteps", self.num_timesteps, exclude="tensorboard")
+        self.logger.record(
+            "time/time_elapsed", int(time_elapsed), exclude="tensorboard"
+        )
+        self.logger.record(
+            "time/total_timesteps", self.num_timesteps, exclude="tensorboard"
+        )
 
         if len(self.ep_success_buffer) > 0:
-            self.logger.record("rollout/ep_success_rate", safe_mean(self.ep_success_buffer))
+            self.logger.record(
+                "rollout/ep_success_rate", safe_mean(self.ep_success_buffer)
+            )
         # Pass the number of timesteps for tensorboard
         self.logger.dump(step=self.num_timesteps)
 
     def save(
         self,
-        path: Union[str, pathlib.Path, io.BufferedIOBase]=None,
+        path: Union[str, pathlib.Path, io.BufferedIOBase] = None,
         exclude: Optional[Iterable[str]] = None,
         include: Optional[Iterable[str]] = None,
     ) -> None:
@@ -483,19 +523,29 @@ class PPO(ori_PPO):
             if "device" in data["policy_kwargs"]:
                 del data["policy_kwargs"]["device"]
             # backward compatibility, convert to new format
-            if "net_arch" in data["policy_kwargs"] and len(data["policy_kwargs"]["net_arch"]) > 0:
+            if (
+                "net_arch" in data["policy_kwargs"]
+                and len(data["policy_kwargs"]["net_arch"]) > 0
+            ):
                 saved_net_arch = data["policy_kwargs"]["net_arch"]
-                if isinstance(saved_net_arch, list) and isinstance(saved_net_arch[0], dict):
+                if isinstance(saved_net_arch, list) and isinstance(
+                    saved_net_arch[0], dict
+                ):
                     data["policy_kwargs"]["net_arch"] = saved_net_arch[0]
 
-        if "policy_kwargs" in kwargs and kwargs["policy_kwargs"] != data["policy_kwargs"]:
+        if (
+            "policy_kwargs" in kwargs
+            and kwargs["policy_kwargs"] != data["policy_kwargs"]
+        ):
             raise ValueError(
                 f"The specified policy kwargs do not equal the stored policy kwargs."
                 f"Stored kwargs: {data['policy_kwargs']}, specified kwargs: {kwargs['policy_kwargs']}"
             )
 
         if "observation_space" not in data or "action_space" not in data:
-            raise KeyError("The observation_space and action_space were not given, can't verify new environments")
+            raise KeyError(
+                "The observation_space and action_space were not given, can't verify new environments"
+            )
 
         # Gym -> Gymnasium space conversion
         for key in {"observation_space", "action_space"}:
@@ -538,7 +588,9 @@ class PPO(ori_PPO):
             # Patch to load Policy saved using SB3 < 1.7.0
             # the error is probably due to old policy being loaded
             # See https://github.com/DLR-RM/stable-baselines3/issues/1233
-            if "pi_features_extractor" in str(e) and "Missing key(s) in state_dict" in str(e):
+            if "pi_features_extractor" in str(
+                e
+            ) and "Missing key(s) in state_dict" in str(e):
                 model.set_parameters(params, exact_match=False, device=device)
                 warnings.warn(
                     "You are probably loading a model saved with SB3 < 1.7.0, "

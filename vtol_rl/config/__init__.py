@@ -10,13 +10,14 @@ except Exception:  # pragma: no cover
     from importlib_resources import files, as_file  # type: ignore
 
 
-ROOT_PKG = __name__  
+ROOT_PKG = __name__
 
 
 @dataclass(frozen=True)
 class JsonResource:
     """Represents a JSON resource (relative path to the config directory)"""
-    relpath: str   
+
+    relpath: str
 
     def load(self, *, encoding: str = "utf-8") -> Any:
         """Load and return the JSON content"""

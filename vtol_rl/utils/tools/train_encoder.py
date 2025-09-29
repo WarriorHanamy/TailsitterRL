@@ -4,7 +4,9 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from PIL import Image
-import os, sys
+import os
+import sys
+
 # import tensorboard
 from torch.utils.tensorboard import SummaryWriter
 
@@ -16,20 +18,25 @@ class GrayscaleImageDataset(Dataset):
     def __init__(self, image_dir, transform=None):
         self.image_dir = image_dir
         self.transform = transform
-        self.image_paths = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith('.png')]
+        self.image_paths = [
+            os.path.join(image_dir, f)
+            for f in os.listdir(image_dir)
+            if f.endswith(".png")
+        ]
 
     def __len__(self):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
         image_path = self.image_paths[idx]
-        image = Image.open(image_path).convert('L')  # Convert image to grayscale
+        image = Image.open(image_path).convert("L")  # Convert image to grayscale
         if self.transform:
             image = self.transform(image)
         return image
 
 
 # 定义简化版自动编码器模型
+
 
 class Autoencoder(nn.Module):
     def __init__(self, channels):
@@ -38,9 +45,15 @@ class Autoencoder(nn.Module):
         encoder_layers = []
         for i in range(len(channels)):
             if i == 0:
-                encoder_layers.append(nn.Conv2d(1, channels[i], kernel_size=3, stride=2, padding=1))
+                encoder_layers.append(
+                    nn.Conv2d(1, channels[i], kernel_size=3, stride=2, padding=1)
+                )
             else:
-                encoder_layers.append(nn.Conv2d(channels[i - 1], channels[i], kernel_size=3, stride=2, padding=1))
+                encoder_layers.append(
+                    nn.Conv2d(
+                        channels[i - 1], channels[i], kernel_size=3, stride=2, padding=1
+                    )
+                )
             encoder_layers.append(nn.LeakyReLU())
             # encoder_layers.append(nn.MaxPool2d(2, stride=2))  # 添加下采样层
         self.encoder = nn.Sequential(*encoder_layers)
@@ -51,9 +64,27 @@ class Autoencoder(nn.Module):
         decoder_layers = []
         for i in range(len(channels) - 1, -1, -1):
             if i == 0:
-                decoder_layers.append(nn.ConvTranspose2d(channels[i], 1, kernel_size=3, stride=2, padding=1, output_padding=1))
+                decoder_layers.append(
+                    nn.ConvTranspose2d(
+                        channels[i],
+                        1,
+                        kernel_size=3,
+                        stride=2,
+                        padding=1,
+                        output_padding=1,
+                    )
+                )
             else:
-                decoder_layers.append(nn.ConvTranspose2d(channels[i], channels[i - 1], kernel_size=3, stride=2, padding=1, output_padding=1))
+                decoder_layers.append(
+                    nn.ConvTranspose2d(
+                        channels[i],
+                        channels[i - 1],
+                        kernel_size=3,
+                        stride=2,
+                        padding=1,
+                        output_padding=1,
+                    )
+                )
             decoder_layers.append(nn.LeakyReLU())
             # decoder_layers.append(nn.Upsample(scale_factor=2, mode='nearest'))  # 添加上采样层
         self.decoder = nn.Sequential(*decoder_layers)
@@ -68,8 +99,6 @@ class Autoencoder(nn.Module):
     def encode(self, x):
         return self.f(self.encoder(x))
 
-
-
     def para_init(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -82,30 +111,36 @@ class Autoencoder(nn.Module):
                     nn.init.constant_(m.bias, 0)
 
 
-path = os.path.dirname(os.path.abspath(sys.argv[0])) + '/saved/depth_autoencoder'
+path = os.path.dirname(os.path.abspath(sys.argv[0])) + "/saved/depth_autoencoder"
 channels = [2, 4, 8, 16]
-model = Autoencoder(channels)
+
 
 def main():
-    transform = transforms.Compose([
-        transforms.Resize((64, 64)),  # 调整图像大小
-        transforms.ToTensor(),  # 转换为张量
-    ])
-    dataset = GrayscaleImageDataset(image_dir=os.getcwd() + "/datasets/Images/depth_dataset/64", transform=transform)
+    transform = transforms.Compose(
+        [
+            transforms.Resize((64, 64)),  # 调整图像大小
+            transforms.ToTensor(),  # 转换为张量
+        ]
+    )
+    dataset = GrayscaleImageDataset(
+        image_dir=os.getcwd() + "/datasets/Images/depth_dataset/64", transform=transform
+    )
     dataloader = DataLoader(dataset, batch_size=10240, shuffle=True)
     criterion = nn.MSELoss()  # 使用均方误差作为损失函数
 
     if not IS_TEST:
         # 数据预处理和数据加载
 
-
         try:
             os.mkdir(os.path.dirname(os.path.abspath(sys.argv[0])) + "/saved/")
-        except:
+        except Exception:
             pass
-        Writer = SummaryWriter(os.path.dirname(os.path.abspath(sys.argv[0])) + "/saved/")
+        Writer = SummaryWriter(
+            os.path.dirname(os.path.abspath(sys.argv[0])) + "/saved/"
+        )
 
         # 创建模型实例
+        model = Autoencoder(channels)
 
         # 定义损失函数和优化器
         optimizer = optim.Adam(model.parameters(), lr=1e-2)  # 使用Adam优化器
@@ -126,11 +161,9 @@ def main():
                 loss.backward()
                 optimizer.step()
                 i += 1
-                Writer.add_scalar('training loss',
-                                  loss / 10,
-                                  i)
+                Writer.add_scalar("training loss", loss / 10, i)
 
-            print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}')
+            print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}")
 
         print("Training finished.")
 
@@ -156,11 +189,11 @@ def main():
         for i in range(32):
             c, r = i % 4, i // 4
             ori, output = data[i], model(data[i])
-            e = model.encode(ori)
             axeses[r, 2 * c].imshow(ori.squeeze())
             axeses[r, 2 * c + 1].imshow(output.squeeze().detach().numpy())
             axeses[r, 2 * c].set_title(format(criterion(ori, output).item(), ".4f"))
         plt.show()
+
 
 if __name__ == "__main__":
     main()

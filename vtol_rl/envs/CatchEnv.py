@@ -4,27 +4,30 @@ import numpy as np
 import torch as th
 
 from .base.droneGymEnv import DroneGymEnvsBase
-from vtol_rl.utils.randomization import UniformStateRandomizer, NormalStateRandomizer
+from vtol_rl.utils.randomization import UniformStateRandomizer
 
 g = th.tensor([[0, 0, -9.8]])
 
 
 class ball:
-    def __init__(self,
-                 num_agents,
-                 random_kwargs=None,
-                 dt=0.2,
-                 ):
+    def __init__(
+        self,
+        num_agents,
+        random_kwargs=None,
+        dt=0.2,
+    ):
         self.num_agents = num_agents
-        random_kwargs = dict(
-            position={"mean": [1., 0., 1.5], "half": [0.0, 2., 1.]},
-            orientation={"mean": [0., 0., 0.], "half": [0., 0., 0.]},
-            velocity={"mean": [0., 0., 0.], "half": [1., 1., 0.]},
-            angular_velocity={"mean": [0., 0., 0.], "half": [0., 0., 0.]},
-        ) if random_kwargs is None else random_kwargs
-        self.randomizer = UniformStateRandomizer(
-            **random_kwargs
+        random_kwargs = (
+            dict(
+                position={"mean": [1.0, 0.0, 1.5], "half": [0.0, 2.0, 1.0]},
+                orientation={"mean": [0.0, 0.0, 0.0], "half": [0.0, 0.0, 0.0]},
+                velocity={"mean": [0.0, 0.0, 0.0], "half": [1.0, 1.0, 0.0]},
+                angular_velocity={"mean": [0.0, 0.0, 0.0], "half": [0.0, 0.0, 0.0]},
+            )
+            if random_kwargs is None
+            else random_kwargs
         )
+        self.randomizer = UniformStateRandomizer(**random_kwargs)
         self.position = th.empty((self.num_agents, 3))
         self.orientation = th.empty((self.num_agents, 3))
         self.velocity = th.empty((self.num_agents, 3))
@@ -51,20 +54,19 @@ class ball:
 
 class CatchEnv(DroneGymEnvsBase):
     def __init__(
-            self,
-            num_agent_per_scene: int = 1,
-            num_scene: int = 1,
-            seed: int = 42,
-            visual: bool = False,
-            max_episode_steps: int = 1000,
-            device: Optional[th.device] = th.device("cpu"),
-            dynamics_kwargs=None,
-            random_kwargs=None,
-            requires_grad: bool = False,
-            scene_kwargs: Optional[Dict] = None,
-            sensor_kwargs: Optional[List] = None,
-            latent_dim=None,
-
+        self,
+        num_agent_per_scene: int = 1,
+        num_scene: int = 1,
+        seed: int = 42,
+        visual: bool = False,
+        max_episode_steps: int = 1000,
+        device: Optional[th.device] = th.device("cpu"),
+        dynamics_kwargs=None,
+        random_kwargs=None,
+        requires_grad: bool = False,
+        scene_kwargs: Optional[Dict] = None,
+        sensor_kwargs: Optional[List] = None,
+        latent_dim=None,
     ):
         super().__init__(
             num_agent_per_scene=num_agent_per_scene,
@@ -85,16 +87,13 @@ class CatchEnv(DroneGymEnvsBase):
             "isolated": True,
         }
 
-    def get_observation(
-            self,
-            indice=None
-    ) -> dict:
+    def get_observation(self, indice=None) -> dict:
         pass
 
     def get_success(self) -> th.Tensor:
         pass
 
     def get_reward(
-            self,
+        self,
     ) -> Union[np.ndarray, th.Tensor]:
         pass

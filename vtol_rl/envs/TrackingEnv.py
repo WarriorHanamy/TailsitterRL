@@ -1,33 +1,28 @@
-import os
-import sys
-
 import numpy as np
 from .base.droneGymEnv import DroneGymEnvsBase
-from typing import Union, Tuple, List, Optional, Dict
+from typing import Optional, Dict
 import torch as th
-from habitat_sim import SensorType
 from gymnasium import spaces
-from vtol_rl.utils.tools.train_encoder import model as encoder
 from vtol_rl.utils.type import TensorDict
 
 
 class TrackEnv(DroneGymEnvsBase):
     def __init__(
-            self,
-            num_agent_per_scene: int = 1,
-            num_scene: int = 1,
-            seed: int = 42,
-            visual: bool = True,
-            requires_grad: bool = False,
-            random_kwargs: dict = {},
-            dynamics_kwargs: dict = {},
-            scene_kwargs: dict = {},
-            sensor_kwargs: list = [],
-            device: str = "cpu",
-            target: Optional[th.Tensor] = None,
-            max_episode_steps: int = 256,
-            latent_dim=None,
-            tensor_output=False,
+        self,
+        num_agent_per_scene: int = 1,
+        num_scene: int = 1,
+        seed: int = 42,
+        visual: bool = False,
+        requires_grad: bool = False,
+        random_kwargs: dict = {},
+        dynamics_kwargs: dict = {},
+        scene_kwargs: dict = {},
+        sensor_kwargs: list = [],
+        device: str = "cpu",
+        target: Optional[th.Tensor] = None,
+        max_episode_steps: int = 256,
+        latent_dim=None,
+        tensor_output=False,
     ):
         self.center = th.as_tensor([2, 0, 1])
         self.next_points_num = 10
@@ -37,14 +32,17 @@ class TrackEnv(DroneGymEnvsBase):
         self.success_radius = 0.5
 
         random_kwargs = {
-            "state_generator":
-                {
-                    "class": "Uniform",
-                    "kwargs": [
-                        {"position": {"mean": [self.center[0], 0., self.center[2]],
-                                      "half": [.2, .2, 0.2]}},
-                    ]
-                }
+            "state_generator": {
+                "class": "Uniform",
+                "kwargs": [
+                    {
+                        "position": {
+                            "mean": [self.center[0], 0.0, self.center[2]],
+                            "half": [0.2, 0.2, 0.2],
+                        }
+                    },
+                ],
+            }
         }
 
         super().__init__(
@@ -65,38 +63,49 @@ class TrackEnv(DroneGymEnvsBase):
         self.observation_space["state"] = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(3 * (self.next_points_num - 1) + self.observation_space["state"].shape[0],),
-            dtype=np.float32
+            shape=(
+                3 * (self.next_points_num - 1)
+                + self.observation_space["state"].shape[0],
+            ),
+            dtype=np.float32,
         )
 
         self.update_target()
 
     def update_target(self):
-        ts = self.t.repeat(self.next_points_num, 1).T + th.arange(self.next_points_num) * self.dt
-        self.target = (th.stack([self.radius * th.cos(self.radius_spd * ts) + self.center[0],
-                                 self.radius * th.sin(self.radius_spd * ts) + self.center[1],
-                                 0 * th.sin(self.radius_spd * ts) + self.center[2]
-                                 ])
-                       ).permute(1, 2, 0)
+        ts = (
+            self.t.repeat(self.next_points_num, 1).T
+            + th.arange(self.next_points_num) * self.dt
+        )
+        self.target = (
+            th.stack(
+                [
+                    self.radius * th.cos(self.radius_spd * ts) + self.center[0],
+                    self.radius * th.sin(self.radius_spd * ts) + self.center[1],
+                    0 * th.sin(self.radius_spd * ts) + self.center[2],
+                ]
+            )
+        ).permute(1, 2, 0)
 
-    def get_observation(
-            self,
-            indices=None
-    ) -> Dict:
+    def get_observation(self, indices=None) -> Dict:
         diff_pos = self.target - self.position.unsqueeze(1)
         # consider target as next serveral waypoint
         diff_pos_flatten = diff_pos.reshape(self.num_envs, -1)
 
-        state = th.hstack([
-            diff_pos_flatten / self.max_sense_radius,
-            self.orientation,
-            self.velocity / 10,
-            self.angular_velocity / 10,
-        ]).to(self.device)
+        state = th.hstack(
+            [
+                diff_pos_flatten / self.max_sense_radius,
+                self.orientation,
+                self.velocity / 10,
+                self.angular_velocity / 10,
+            ]
+        ).to(self.device)
 
-        return TensorDict({
-            "state": state,
-        })
+        return TensorDict(
+            {
+                "state": state,
+            }
+        )
 
     def get_success(self) -> th.Tensor:
         return th.full((self.num_agent,), False)
@@ -106,40 +115,34 @@ class TrackEnv(DroneGymEnvsBase):
         base_r = 0.1
         pos_factor = -0.1 * 1 / 9
         reward = (
-                base_r +
-                (self.position - self.target[:, 0, :]).norm(dim=1) * pos_factor +
-                (self.orientation - th.tensor([1, 0, 0, 0])).norm(dim=1) * -0.00001 +
-                (self.velocity - 0).norm(dim=1) * -0.002 +
-                (self.angular_velocity - 0).norm(dim=1) * -0.002
+            base_r
+            + (self.position - self.target[:, 0, :]).norm(dim=1) * pos_factor
+            + (self.orientation - th.tensor([1, 0, 0, 0])).norm(dim=1) * -0.00001
+            + (self.velocity - 0).norm(dim=1) * -0.002
+            + (self.angular_velocity - 0).norm(dim=1) * -0.002
         )
 
         return reward
 
 
 class TrackEnv2(TrackEnv):
-
     def __init__(
-            self,
-            num_agent_per_scene: int = 1,
-            num_scene: int = 1,
-            seed: int = 42,
-            visual: bool = True,
-            requires_grad: bool = False,
-            random_kwargs: dict = {},
-            dynamics_kwargs: dict = {},
-            scene_kwargs: dict = {},
-            sensor_kwargs: list = [],
-            device: str = "cpu",
-            target: Optional[th.Tensor] = None,
-            max_episode_steps: int = 256,
-            latent_dim=None,
-            tensor_output=False,
+        self,
+        num_agent_per_scene: int = 1,
+        num_scene: int = 1,
+        seed: int = 42,
+        visual: bool = False,
+        requires_grad: bool = False,
+        random_kwargs: dict = {},
+        dynamics_kwargs: dict = {},
+        scene_kwargs: dict = {},
+        sensor_kwargs: list = [],
+        device: str = "cpu",
+        target: Optional[th.Tensor] = None,
+        max_episode_steps: int = 256,
+        latent_dim=None,
+        tensor_output=False,
     ):
-        sensor_kwargs = [{
-            "sensor_type": SensorType.DEPTH,
-            "uuid": "depth",
-            "resolution": [64, 64],
-        }]
         super().__init__(
             num_agent_per_scene=num_agent_per_scene,
             num_scene=num_scene,
@@ -154,25 +157,40 @@ class TrackEnv2(TrackEnv):
             max_episode_steps=max_episode_steps,
             target=target,
             latent_dim=latent_dim,
-            tensor_output=tensor_output
+            tensor_output=tensor_output,
+        )
+        self._depth_resolution = (1, 64, 64)
+        self.observation_space["depth"] = spaces.Box(
+            low=0.0,
+            high=np.inf,
+            shape=self._depth_resolution,
+            dtype=np.float32,
         )
 
-    def get_observation(
-            self,
-            indices=None
-    ) -> Dict:
+    def get_observation(self, indices=None) -> Dict:
         diff_pos = self.target - self.position.unsqueeze(1)
         # consider target as next serveral waypoint
         diff_pos_flatten = diff_pos.reshape(self.num_envs, -1)
 
-        state = th.hstack([
-            diff_pos_flatten / self.max_sense_radius,
-            self.orientation,
-            self.velocity / 10,
-            self.angular_velocity / 10,
-        ]).to(self.device)
+        state = th.hstack(
+            [
+                diff_pos_flatten / self.max_sense_radius,
+                self.orientation,
+                self.velocity / 10,
+                self.angular_velocity / 10,
+            ]
+        ).to(self.device)
 
-        return TensorDict({
-            "state": state,
-            "depth": th.as_tensor(self.sensor_obs["depth"]/10).clamp(max=1)
-        })
+        depth = self._synthesize_depth()
+
+        return TensorDict(
+            {
+                "state": state,
+                "depth": depth,
+            }
+        )
+
+    def _synthesize_depth(self) -> th.Tensor:
+        distance = (self.target[:, 0, :] - self.position).norm(dim=1, keepdim=True)
+        depth = distance.view(-1, 1, 1, 1).repeat(1, *self._depth_resolution[1:])
+        return depth.to(self.device)

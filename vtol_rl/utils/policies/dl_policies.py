@@ -1,4 +1,3 @@
-import warnings
 from functools import partial
 import numpy as np
 
@@ -6,13 +5,27 @@ import torch.nn as nn
 import torch as th
 from typing import List, Optional, Type, Union, ClassVar, Dict, Any, Tuple
 
-from stable_baselines3.common.distributions import make_proba_distribution, DiagGaussianDistribution, StateDependentNoiseDistribution, CategoricalDistribution, MultiCategoricalDistribution, BernoulliDistribution, Distribution
+from stable_baselines3.common.distributions import (
+    make_proba_distribution,
+    StateDependentNoiseDistribution,
+    Distribution,
+)
 from stable_baselines3.common.type_aliases import Schedule, PyTorchObs
 
-from utils.policies.extractors import create_mlp, StateExtractor, StateTargetImageExtractor, StateTargetExtractor
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, FlattenExtractor, NatureCNN, MlpExtractor
+from utils.policies.extractors import (
+    create_mlp,
+    StateExtractor,
+    StateTargetImageExtractor,
+    StateTargetExtractor,
+)
+from stable_baselines3.common.torch_layers import (
+    BaseFeaturesExtractor,
+    FlattenExtractor,
+    NatureCNN,
+    MlpExtractor,
+)
 from gymnasium import spaces
-from stable_baselines3.common.policies import BasePolicy, BaseModel
+from stable_baselines3.common.policies import BasePolicy
 
 
 class ActorPolicy(BasePolicy):
@@ -100,7 +113,9 @@ class ActorPolicy(BasePolicy):
 
         self.log_std_init = log_std_init
         dist_kwargs = None
-        assert not (squash_output and not use_sde), "squash_output=True is only available when using gSDE (use_sde=True)"
+        assert not (
+            squash_output and not use_sde
+        ), "squash_output=True is only available when using gSDE (use_sde=True)"
         # Keyword arguments for gSDE distribution
         if use_sde:
             dist_kwargs = {
@@ -114,14 +129,14 @@ class ActorPolicy(BasePolicy):
         self.dist_kwargs = dist_kwargs
 
         # Action distribution
-        self.action_dist = make_proba_distribution(action_space, use_sde=use_sde, dist_kwargs=dist_kwargs)
+        self.action_dist = make_proba_distribution(
+            action_space, use_sde=use_sde, dist_kwargs=dist_kwargs
+        )
 
         self._build(lr_schedule)
 
     def _get_constructor_parameters(self) -> Dict[str, Any]:
         data = super()._get_constructor_parameters()
-
-        default_none_kwargs = self.dist_kwargs or collections.defaultdict(lambda: None)  # type: ignore[arg-type, return-value]
 
         data.update(
             dict(
@@ -143,7 +158,9 @@ class ActorPolicy(BasePolicy):
 
         :param n_envs:
         """
-        assert isinstance(self.action_dist, StateDependentNoiseDistribution), "reset_noise() is only available when using gSDE"
+        assert isinstance(
+            self.action_dist, StateDependentNoiseDistribution
+        ), "reset_noise() is only available when using gSDE"
         self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
 
     def _build_mlp_extractor(self) -> None:
@@ -196,7 +213,9 @@ class ActorPolicy(BasePolicy):
                 module.apply(partial(self.init_weights, gain=gain))
 
         # Setup optimizer with initial learning rate
-        self.optimizer = self.optimizer_class(self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)  # type: ignore[call-arg]
+        self.optimizer = self.optimizer_class(
+            self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs
+        )  # type: ignore[call-arg]
 
     def get_action(self, obs: th.Tensor) -> th.Tensor:
         """
@@ -220,7 +239,9 @@ class ActorPolicy(BasePolicy):
         mean_actions = self.action_net(latent_pi)
         return self.action_dist.proba_distribution(mean_actions, self.log_std)
 
-    def forward(self, obs: th.Tensor, deterministic=False) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
+    def forward(
+        self, obs: th.Tensor, deterministic=False
+    ) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
         """
         Forward pass in all the networks (actor and critic)
 
@@ -233,11 +254,12 @@ class ActorPolicy(BasePolicy):
 
         distribution = self._get_action_dist_from_latent(latent_pi)
         actions = distribution.get_actions(deterministic=deterministic)
-        log_prob = distribution.log_prob(actions)
         return actions.reshape((-1, *self.action_space.shape))
 
     def extract_features(  # type: ignore[override]
-        self, obs: PyTorchObs, features_extractor: Optional[BaseFeaturesExtractor] = None
+        self,
+        obs: PyTorchObs,
+        features_extractor: Optional[BaseFeaturesExtractor] = None,
     ) -> Union[th.Tensor, Tuple[th.Tensor, th.Tensor]]:
         """
         Preprocess the observation if needed and extract features.
@@ -247,8 +269,16 @@ class ActorPolicy(BasePolicy):
         :return: The extracted features. If features extractor is not shared, returns a tuple with the
             features for the actor and the features for the critic.
         """
-        return super().extract_features(obs, self.features_extractor if features_extractor is None else features_extractor)
-    def _predict(self, observation: PyTorchObs, deterministic: bool = False) -> th.Tensor:
+        return super().extract_features(
+            obs,
+            self.features_extractor
+            if features_extractor is None
+            else features_extractor,
+        )
+
+    def _predict(
+        self, observation: PyTorchObs, deterministic: bool = False
+    ) -> th.Tensor:
         """
         Get the action according to the policy for a given observation.
 
@@ -257,6 +287,7 @@ class ActorPolicy(BasePolicy):
         :return: Taken action according to the policy
         """
         return self.get_action(observation)
+
     # def _get_action_dist_from_latent(self, latent_pi: th.Tensor) -> Distribution:
     #     """
     #     Retrieve action distribution given the latent codes.
@@ -281,8 +312,6 @@ class ActorPolicy(BasePolicy):
     #         return self.action_dist.proba_distribution(mean_actions, self.log_std, latent_pi)
     #     else:
     #         raise ValueError("Invalid action distribution")
-
-
 
     # def evaluate_actions(self, obs: PyTorchObs, actions: th.Tensor) -> Tuple[th.Tensor, th.Tensor, Optional[th.Tensor]]:
     #     """
@@ -330,12 +359,13 @@ class ActorPolicy(BasePolicy):
     #     latent_vf = self.mlp_extractor.forward_critic(features)
     #     return self.value_net(latent_vf)
 
+
 class BaseMlpExtractor(nn.Module):
     def __init__(
-            self,
-            features_dim,
-            net_arch: Optional[List[int]] = None,
-            activation_fn: Type[nn.Module] = nn.ReLU,
+        self,
+        features_dim,
+        net_arch: Optional[List[int]] = None,
+        activation_fn: Type[nn.Module] = nn.ReLU,
     ):
         super(BaseMlpExtractor, self).__init__()
         self.features_dim = features_dim
@@ -346,9 +376,7 @@ class BaseMlpExtractor(nn.Module):
 
     def _build(self):
         self.mlp_extractor, _ = create_mlp(
-            self.features_dim,
-            self.net_arch,
-            activation_fn=self.activation_fn
+            self.features_dim, self.net_arch, activation_fn=self.activation_fn
         )
 
     def forward(self, obs: th.Tensor) -> th.Tensor:
@@ -356,46 +384,53 @@ class BaseMlpExtractor(nn.Module):
 
 
 class BaseApgPolicy(nn.Module):
-    MlpExtractorAliases: ClassVar[Dict[str, Type[BaseMlpExtractor]]] = {"MlpExtractor": BaseMlpExtractor}
-    FeaturesExtractorAliases: ClassVar[Dict[str, Type[BaseFeaturesExtractor]]] = \
-        {"StateExtractor": StateExtractor, "StateTargetImageExtractor": StateTargetImageExtractor,
-         "StateTargetExtractor": StateTargetExtractor}
+    MlpExtractorAliases: ClassVar[Dict[str, Type[BaseMlpExtractor]]] = {
+        "MlpExtractor": BaseMlpExtractor
+    }
+    FeaturesExtractorAliases: ClassVar[Dict[str, Type[BaseFeaturesExtractor]]] = {
+        "StateExtractor": StateExtractor,
+        "StateTargetImageExtractor": StateTargetImageExtractor,
+        "StateTargetExtractor": StateTargetExtractor,
+    }
 
     def __init__(
-            self,
-            observation_space: spaces.Space,
-            action_space: spaces.Space,
-            lr_schedule: Optional[Union[str, Dict[str, Any]]],
-            features_extractor_class: Optional[Type[BaseFeaturesExtractor]],
-            mlp_extractor_class: Optional[Type[BaseMlpExtractor]],
-            features_extractor_kwargs: Optional[Dict[str, Any]] = None,
-            mlp_extractor_kwargs: Optional[Dict[str, Any]] = None,
+        self,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        lr_schedule: Optional[Union[str, Dict[str, Any]]],
+        features_extractor_class: Optional[Type[BaseFeaturesExtractor]],
+        mlp_extractor_class: Optional[Type[BaseMlpExtractor]],
+        features_extractor_kwargs: Optional[Dict[str, Any]] = None,
+        mlp_extractor_kwargs: Optional[Dict[str, Any]] = None,
     ):
-
         super(BaseApgPolicy, self).__init__()
         # self.observation_space = observation_space
         # self.action_space = action_space
         self.features_extractor = self._build_features_extractor(
             observation_space=observation_space,
             features_extractor_class=features_extractor_class,
-            features_extractor_kwargs=features_extractor_kwargs
+            features_extractor_kwargs=features_extractor_kwargs,
         )
         self.mlp_extractor = self._build_mlp_extractor(
             mlp_extractor_class=mlp_extractor_class,
-            mlp_extractor_kwargs=mlp_extractor_kwargs
+            mlp_extractor_kwargs=mlp_extractor_kwargs,
         )
-        self.action_net = nn.Linear(self.mlp_extractor.latent_dim_pi, action_space.shape[0])
+        self.action_net = nn.Linear(
+            self.mlp_extractor.latent_dim_pi, action_space.shape[0]
+        )
         # self.action_net = create_mlp(self.mlp_extractor.latent_dim_pi, [action_space.shape[0]], squash_output=True)
         self.lr_schedule = lr_schedule
 
     def _build_features_extractor(
-            self,
-            observation_space: spaces.Space,
-            features_extractor_class: Type[BaseFeaturesExtractor],
-            features_extractor_kwargs: Optional[Dict[str, Any]],
+        self,
+        observation_space: spaces.Space,
+        features_extractor_class: Type[BaseFeaturesExtractor],
+        features_extractor_kwargs: Optional[Dict[str, Any]],
     ) -> Type[BaseFeaturesExtractor]:
         if features_extractor_class in self.FeaturesExtractorAliases:
-            features_extractor_class = self.FeaturesExtractorAliases[features_extractor_class]
+            features_extractor_class = self.FeaturesExtractorAliases[
+                features_extractor_class
+            ]
         else:
             features_extractor_class = features_extractor_class
         if features_extractor_kwargs is None:
@@ -403,14 +438,16 @@ class BaseApgPolicy(nn.Module):
                 "activation_fn": nn.ReLU,
                 "net_arch": [],
             }
-        features_extractor = features_extractor_class(observation_space, **features_extractor_kwargs)
+        features_extractor = features_extractor_class(
+            observation_space, **features_extractor_kwargs
+        )
 
         return features_extractor
 
     def _build_mlp_extractor(
-            self,
-            mlp_extractor_class: Type[BaseMlpExtractor],
-            mlp_extractor_kwargs: Optional[Dict[str, Any]],
+        self,
+        mlp_extractor_class: Type[BaseMlpExtractor],
+        mlp_extractor_kwargs: Optional[Dict[str, Any]],
     ):
         if mlp_extractor_class in self.MlpExtractorAliases:
             mlp_extractor_class = self.MlpExtractorAliases[mlp_extractor_class]
@@ -422,8 +459,7 @@ class BaseApgPolicy(nn.Module):
                 "activation_fn": nn.ReLU,
             }
         mlp_extractor = mlp_extractor_class(
-            features_dim=self.features_extractor.features_dim,
-            **mlp_extractor_kwargs
+            features_dim=self.features_extractor.features_dim, **mlp_extractor_kwargs
         )
         return mlp_extractor
 
