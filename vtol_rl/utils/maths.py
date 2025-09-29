@@ -3,7 +3,13 @@ import torch
 
 class Quaternion:
     def __init__(
-        self, w=None, x=None, y=None, z=None, num=1, device=torch.device("cpu")
+        self,
+        w: torch.Tensor | None = None,
+        x: torch.Tensor | None = None,
+        y: torch.Tensor | None = None,
+        z: torch.Tensor | None = None,
+        num=1,
+        device=torch.device("cpu"),
     ):
         _types = (type(w), type(x), type(y), type(z))
         assert all(
@@ -27,6 +33,25 @@ class Quaternion:
         else:
             raise ValueError("unsupported type")
 
+    @staticmethod
+    def _split_tensor_components(tensor: torch.Tensor):
+        if tensor.ndim == 1:
+            if tensor.shape[0] != 4:
+                raise ValueError(
+                    "Tensor must have 4 elements to represent a quaternion"
+                )
+            return tensor[0], tensor[1], tensor[2], tensor[3]
+
+        if tensor.ndim == 2:
+            if tensor.shape[0] == 4 and tensor.shape[1] != 4:
+                return tensor[0], tensor[1], tensor[2], tensor[3]
+            if tensor.shape[1] == 4:
+                return tensor[:, 0], tensor[:, 1], tensor[:, 2], tensor[:, 3]
+
+        raise ValueError(
+            "Tensor must have shape (4,), (4, N), or (N, 4) to represent quaternion components"
+        )
+
     def to(self, device):
         self.w = self.w.to(device)
         self.x = self.x.to(device)
@@ -38,20 +63,83 @@ class Quaternion:
         if isinstance(other, Quaternion):
             # quaternion multiplication
             return self * other
-        elif other.shape[0] == 3:
-            # vector rotation
-            return (self * Quaternion(torch.tensor(0), *other) * self.conjugate()).imag
+
+        if not torch.is_tensor(other):
+            other = torch.as_tensor(other, dtype=self.w.dtype, device=self.w.device)
+
+        squeeze_output = False
+        transpose_output = False
+
+        if other.ndim == 1:
+            if other.shape[0] != 3:
+                raise ValueError("Vector must have 3 elements")
+            other = other.unsqueeze(0)
+            squeeze_output = True
+        elif other.ndim == 2:
+            if other.shape[1] == 3:
+                other = other
+            elif other.shape[0] == 3:
+                other = other.T
+                transpose_output = True
+            else:
+                raise ValueError("Vector batch must have shape (N, 3) or (3, N)")
+        else:
+            raise ValueError("Vector must be 1D or 2D tensor")
+
+        other = other.to(device=self.w.device, dtype=self.w.dtype)
+
+        zeros = torch.zeros(other.size(0), device=other.device, dtype=other.dtype)
+        pure = Quaternion(zeros, other[:, 0], other[:, 1], other[:, 2])
+        rotated = self * pure * self.conjugate()
+        result = rotated.imag
+
+        if squeeze_output:
+            return result.squeeze(0)
+        if transpose_output:
+            return result.T
+        return result
 
     def inv_rotate(self, other):
         """
         rotate to local
         """
         if isinstance(other, Quaternion):
-            # quaternion multiplication
             return self.conjugate() * other
-        elif other.shape[0] == 3:
-            # vector rotation
-            return (self.conjugate() * Quaternion(torch.tensor(0), *other) * self).imag
+
+        if not torch.is_tensor(other):
+            other = torch.as_tensor(other, dtype=self.w.dtype, device=self.w.device)
+
+        squeeze_output = False
+        transpose_output = False
+
+        if other.ndim == 1:
+            if other.shape[0] != 3:
+                raise ValueError("Vector must have 3 elements")
+            other = other.unsqueeze(0)
+            squeeze_output = True
+        elif other.ndim == 2:
+            if other.shape[1] == 3:
+                pass
+            elif other.shape[0] == 3:
+                other = other.T
+                transpose_output = True
+            else:
+                raise ValueError("Vector batch must have shape (N, 3) or (3, N)")
+        else:
+            raise ValueError("Vector must be 1D or 2D tensor")
+
+        other = other.to(device=self.w.device, dtype=self.w.dtype)
+
+        zeros = torch.zeros(other.size(0), device=other.device, dtype=other.dtype)
+        pure = Quaternion(zeros, other[:, 0], other[:, 1], other[:, 2])
+        rotated = self.conjugate() * pure * self
+        result = rotated.imag
+
+        if squeeze_output:
+            return result.squeeze(0)
+        if transpose_output:
+            return result.T
+        return result
 
     def extract_yaw_only(self):
         """
@@ -124,53 +212,40 @@ class Quaternion:
 
     @property
     def R(self):
-        # return torch.permute(torch.stack([
-        #     torch.stack([1 - 2 * (self.y.pow(2) + self.z.pow(2)), 2 * (self.x * self.y - self.z * self.w), 2 * (self.x * self.z + self.y * self.w)]),
-        #     torch.stack([2 * (self.x * self.y + self.z * self.w), 1 - 2 * (self.x.pow(2) + self.z.pow(2)), 2 * (self.y * self.z - self.x * self.w)]),
-        #     torch.stack([2 * (self.x * self.z - self.y * self.w), 2 * (self.y * self.z + self.x * self.w), 1 - 2 * (self.x.pow(2) + self.y.pow(2))])
-        # ]), (2,0,1))
-        return torch.stack(
-            [
-                torch.stack(
-                    [
-                        1 - 2 * (self.y.pow(2) + self.z.pow(2)),
-                        2 * (self.x * self.y - self.z * self.w),
-                        2 * (self.x * self.z + self.y * self.w),
-                    ]
-                ),
-                torch.stack(
-                    [
-                        2 * (self.x * self.y + self.z * self.w),
-                        1 - 2 * (self.x.pow(2) + self.z.pow(2)),
-                        2 * (self.y * self.z - self.x * self.w),
-                    ]
-                ),
-                torch.stack(
-                    [
-                        2 * (self.x * self.z - self.y * self.w),
-                        2 * (self.y * self.z + self.x * self.w),
-                        1 - 2 * (self.x.pow(2) + self.y.pow(2)),
-                    ]
-                ),
-            ]
-        )
+        """
+        Args: self (Quaternion): shape (N, (w,x,y,z))
+        Returns: R (torch.Tensor): shape (N, 3, 3)
+        """
+        r00 = 1 - 2 * (self.y.pow(2) + self.z.pow(2))
+        r01 = 2 * (self.x * self.y - self.z * self.w)
+        r02 = 2 * (self.x * self.z + self.y * self.w)
+
+        r10 = 2 * (self.x * self.y + self.z * self.w)
+        r11 = 1 - 2 * (self.x.pow(2) + self.z.pow(2))
+        r12 = 2 * (self.y * self.z - self.x * self.w)
+
+        r20 = 2 * (self.x * self.z - self.y * self.w)
+        r21 = 2 * (self.y * self.z + self.x * self.w)
+        r22 = 1 - 2 * (self.x.pow(2) + self.y.pow(2))
+
+        row0 = torch.stack([r00, r01, r02], dim=-1)
+        row1 = torch.stack([r10, r11, r12], dim=-1)
+        row2 = torch.stack([r20, r21, r22], dim=-1)
+        return torch.stack([row0, row1, row2], dim=-2)
 
     @property
     def x_axis(self):
         # return torch.stack([1 - 2 * (self.y.pow(2) + self.z.pow(2)), 2 * (self.x * self.y + self.z * self.w), 2 * (self.x * self.z - self.y * self.w)])
-        x_axis = torch.stack(
+        return torch.stack(
             [
-                # 1 - 2 * (self.y*self.y + self.z*self.z),
-                #  2 * (self.x * self.y + self.z * self.w),
-                # 2 * (self.x * self.z - self.y * self.w)
                 1
                 - 2
                 * (self.y.clone() * self.y.clone() + self.z.clone() * self.z.clone()),
                 2 * (self.x.clone() * self.y.clone() + self.z.clone() * self.w.clone()),
                 2 * (self.x.clone() * self.z.clone() - self.y.clone() * self.w.clone()),
-            ]
+            ],
+            dim=-1,
         )
-        return x_axis
 
     @property
     def xz_axis(self):
@@ -182,54 +257,31 @@ class Quaternion:
         #     2 * (self.y * self.z - self.x * self.w),
         #     1 - 2 * (self.x.pow(2) + self.y.pow(2))])
         # ]) # debug xzaxis format using clone like x_axis
-        return torch.stack(
+        first_row = torch.stack(
             [
-                torch.stack(
-                    [
-                        1
-                        - 2
-                        * (
-                            self.y.clone() * self.y.clone()
-                            + self.z.clone() * self.z.clone()
-                        ),
-                        2
-                        * (
-                            self.x.clone() * self.y.clone()
-                            - self.z.clone() * self.w.clone()
-                        ),
-                        2
-                        * (
-                            self.x.clone() * self.z.clone()
-                            + self.y.clone() * self.w.clone()
-                        ),
-                    ]
-                ),
-                torch.stack(
-                    [
-                        2
-                        * (
-                            self.x.clone() * self.z.clone()
-                            + self.y.clone() * self.w.clone()
-                        ),
-                        2
-                        * (
-                            self.y.clone() * self.z.clone()
-                            - self.x.clone() * self.w.clone()
-                        ),
-                        1
-                        - 2
-                        * (
-                            self.x.clone() * self.x.clone()
-                            + self.y.clone() * self.y.clone()
-                        ),
-                    ]
-                ),
-            ]
+                1
+                - 2
+                * (self.y.clone() * self.y.clone() + self.z.clone() * self.z.clone()),
+                2 * (self.x.clone() * self.y.clone() - self.z.clone() * self.w.clone()),
+                2 * (self.x.clone() * self.z.clone() + self.y.clone() * self.w.clone()),
+            ],
+            dim=-1,
         )
+        second_row = torch.stack(
+            [
+                2 * (self.x.clone() * self.z.clone() + self.y.clone() * self.w.clone()),
+                2 * (self.y.clone() * self.z.clone() - self.x.clone() * self.w.clone()),
+                1
+                - 2
+                * (self.x.clone() * self.x.clone() + self.y.clone() * self.y.clone()),
+            ],
+            dim=-1,
+        )
+        return torch.stack([first_row, second_row], dim=-2)
 
     @property
     def shape(self):
-        return 4, len(self)
+        return (self.w.shape[0], 4)
 
     @property
     def real(self):
@@ -237,7 +289,7 @@ class Quaternion:
 
     @property
     def imag(self):
-        return torch.stack([self.x, self.y, self.z])
+        return torch.stack([self.x, self.y, self.z], dim=-1)
 
     def __mul__(self, other):
         if isinstance(other, Quaternion):
@@ -287,12 +339,8 @@ class Quaternion:
                 self.w + other.w, self.x + other.x, self.y + other.y, self.z + other.z
             )
         elif isinstance(other, torch.Tensor):
-            return Quaternion(
-                self.w + other[0],
-                self.x + other[1],
-                self.y + other[2],
-                self.z + other[3],
-            )
+            w, x, y, z = Quaternion._split_tensor_components(other)
+            return Quaternion(self.w + w, self.x + x, self.y + y, self.z + z)
         else:
             raise ValueError("unsupported type")
 
@@ -320,12 +368,11 @@ class Quaternion:
             self.y[indices] = value.y
             self.z[indices] = value.z
         elif isinstance(value, torch.Tensor):
-            # Assign directly for a single index
-
-            self.w[indices] = value[0]
-            self.x[indices] = value[1]
-            self.y[indices] = value[2]
-            self.z[indices] = value[3]
+            w, x, y, z = Quaternion._split_tensor_components(value)
+            self.w[indices] = w
+            self.x[indices] = x
+            self.y[indices] = y
+            self.z[indices] = z
         else:
             raise ValueError("Assigned value must be an instance of quaternion")
 
@@ -342,7 +389,7 @@ class Quaternion:
         return Quaternion(self.w, -self.x, -self.y, -self.z)
 
     def toTensor(self):
-        return torch.stack([self.w, self.x, self.y, self.z])
+        return torch.stack([self.w, self.x, self.y, self.z], dim=-1)
 
     def append(self, other):
         self.w = torch.cat([self.w, other.w])
@@ -361,7 +408,7 @@ class Quaternion:
                 2 * (self.w * self.z + self.x * self.y),
                 1 - 2 * (self.y.pow(2) + self.z.pow(2)),
             )
-            return torch.stack([roll, pitch, yaw])  # roll pitch yaw
+            return torch.stack([roll, pitch, yaw], dim=-1)
         elif order == "xyz":
             roll = torch.atleast_1d(
                 torch.atan2(
@@ -378,7 +425,7 @@ class Quaternion:
                     1 - 2 * (self.x.pow(2) + self.z.pow(2)),
                 )
             )
-            return torch.stack([roll, pitch, yaw])  # roll pitch yaw
+            return torch.stack([roll, pitch, yaw], dim=-1)
 
     @staticmethod
     def from_euler(roll, pitch, yaw, order="zyx"):

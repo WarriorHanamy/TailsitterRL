@@ -111,14 +111,13 @@ class DroneEnvsBase:
                 dim=1,
             )
             # normalize the orientation
-            if self.dynamics.is_quat_output:
-                normalized_ori = torch.nn.functional.normalize(
-                    state_with_noise[:, 3:7], p=2, dim=1
-                )
-                state_with_noise = torch.cat(
-                    [state_with_noise[:, :3], normalized_ori, state_with_noise[:, 7:]],
-                    dim=1,
-                )
+            normalized_ori = torch.nn.functional.normalize(
+                state_with_noise[:, 3:7], p=2, dim=1
+            )
+            state_with_noise = torch.cat(
+                [state_with_noise[:, :3], normalized_ori, state_with_noise[:, 7:]],
+                dim=1,
+            )
             return state_with_noise
 
     def _create_bbox(self):
@@ -307,7 +306,7 @@ class DroneEnvsBase:
     def state(self):
         """
         Returns:
-            torch.Tensor: shape is (num_agents, state_dim), typically is (num_agents, 17)
+            torch.Tensor: shape is (num_agents, state_dim), currently (num_agents, 13)
         """
         return self.dynamics.state
 

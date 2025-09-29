@@ -64,18 +64,7 @@ class TailsitterEnvsBase(VecEnv):
         self.is_train = is_train
 
         # key interference of gym env
-        state_size = (
-            3
-            + 3
-            + 3
-            + (
-                3
-                if self.envs.dynamics.angular_output_type == "euler"
-                else (
-                    4 if self.envs.dynamics.angular_output_type == "quaternion" else 6
-                )
-            )
-        )
+        state_size = 3 + 4 + 3 + 3
 
         # REC MARK: multi-modal observation space construction, though it is not implemented here yet (images)
         # self.observation_space = spaces.Dict({
@@ -507,7 +496,7 @@ class TailsitterEnvsBase(VecEnv):
     def get_observation(self, indice=None) -> dict:
         observations = {
             "depth": np.zeros([self.num_agent, 255, 255, 3], dtype=np.uint8),
-            "state": np.zeros([self.num_agent, 12], dtype=np.float32),
+            "state": np.zeros([self.num_agent, 13], dtype=np.float32),
         }
         return observations
 
