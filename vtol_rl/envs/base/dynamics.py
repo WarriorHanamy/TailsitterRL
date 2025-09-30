@@ -7,8 +7,8 @@ from vtol_rl.utils.type import ACTION_TYPE, PID, Uniform, action_type_alias, bou
 
 # These will be moved to the correct device in _set_device method
 class Dynamics:
-    g = torch.tensor([[0, 0, -9.81]]).T.contiguous()
-    z = torch.tensor([[0, 0, 1]]).T.contiguous()
+    g = torch.tensor([[0, 0, -9.81]])  # gravity vector
+    z = torch.tensor([[0, 0, 1]])  # upward vector
 
     def __init__(
         self,
@@ -36,14 +36,14 @@ class Dynamics:
         # iterative variables
         self.num: int = num
         self._position: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
-        self._orientation: Quaternion = torch.Tensor(self.num, 4).to(self.device)
+        self._orientation: Quaternion = Quaternion(num=self.num, device=self.device)
         self._velocity: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
         self._angular_velocity: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
         self._motor_omega: torch.Tensor = torch.Tensor(self.num, 4).to(self.device)
         self._thrusts: torch.Tensor = torch.Tensor(self.num, 4).to(self.device)
         self._acc: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
         self._angular_acc: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
-        self._t: torch.Tensor = torch.Tensor(self.num, 1).to(self.device)
+        self._t: torch.Tensor = torch.zeros((self.num,), device=self.device)
 
         self.action_type = action_type_alias[action_type]
         self.sim_time_step = sim_time_step
@@ -71,7 +71,9 @@ class Dynamics:
         self._get_scale_factor()
         self._set_device(device)
 
-        self._init_thrust_mag = -(self.m * Dynamics.g / 4)[-1]
+        # Hover thrust per rotor should be scalar; previous implementation returned a
+        # length-3 tensor because gravity is stored as a 3-vector.
+        self._init_thrust_mag = (self.m * -Dynamics.g[0, 2]) / 4
         self._init_motor_omega = self._compute_rotor_omega(self._init_thrust_mag)
         self._drag_random = drag_random
 
@@ -359,7 +361,7 @@ class Dynamics:
             self._pre_action.append(action.clone())
             action = self._pre_action.pop(0)
 
-        command = self._de_normalize(action).T
+        command = self._de_normalize(action)
         # print(f"command: {command.shape} {command}")
         thrust_des = self._get_thrust_from_cmd(command)  #
         assert (thrust_des <= self._bd_thrust.max).all()  # debug
@@ -373,18 +375,18 @@ class Dynamics:
 
             # compute linear acceleration and body torque
             velocity_body = self._orientation.inv_rotate(self._velocity)
-            linear_drag = self._linear_drag_coeffs * velocity_body
-            quadratic_drag = (
-                self._quad_drag_coeffs * velocity_body * velocity_body.abs()
-            )
+            linear_drag_coeffs = self._linear_drag_coeffs.reshape(-1, 3)
+            quadratic_drag_coeffs = self._quad_drag_coeffs.reshape(-1, 3)
+            linear_drag = linear_drag_coeffs * velocity_body
+            quadratic_drag = quadratic_drag_coeffs * velocity_body * velocity_body.abs()
             drag = linear_drag + quadratic_drag
             # drag = self._drag_coeffs * (self._orientation.inv_rotate(self._velocity - 0).pow(2))
-            self._acc = (
-                self._orientation.rotate(Dynamics.z * force_torque[0] - drag) / self.m
-                + Dynamics.g
-            )
+            thrust_body = Dynamics.z * force_torque[:, 0].unsqueeze(1)
+            total_force_body = thrust_body - drag
+            gravity = Dynamics.g
+            self._acc = self._orientation.rotate(total_force_body) / self.m + gravity
 
-            torque = force_torque[1:]
+            torque = force_torque[:, 1:]
 
             # integrate the state
             (
@@ -438,8 +440,17 @@ class Dynamics:
             # self._ctrl_i += (self._BODYRATE_PID.i @ (angular_velocity_error * self.sim_time_step))
             # self._ctrl_i = self._ctrl_i.clip(min=-3, max=3)
             # TODO
-            p_term = self._BODYRATE_PID.p * angular_velocity_error
-            d_term = -self._BODYRATE_PID.d * self._angular_acc
+            pid_p = self._BODYRATE_PID.p
+            if pid_p.ndim == 2:
+                p_term = angular_velocity_error @ pid_p.T
+            else:
+                p_term = pid_p * angular_velocity_error
+
+            pid_d = self._BODYRATE_PID.d
+            if pid_d.ndim == 2:
+                d_term = -(self._angular_acc @ pid_d.T)
+            else:
+                d_term = -pid_d * self._angular_acc
 
             p_term_reshaped = p_term.unsqueeze(2)  # Shape becomes (N, 3, 1)
             inertia_reshaped = self._inertia.unsqueeze(0)  # Shape becomes (1, 3, 3)
@@ -598,10 +609,12 @@ class Dynamics:
             normal_range (-1, 1).
         """
         thrust_normalize_method = "medium"  # "max_min"
+        g_val = -Dynamics.g.view(-1)[2]
         if self.action_type == ACTION_TYPE.BODYRATE:
             if thrust_normalize_method == "medium":
                 thrust_normalizer = Uniform(
-                    mean=-Dynamics.g[2], radius=-0.5 * Dynamics.g[2]
+                    mean=g_val,
+                    radius=0.5 * g_val,  # hover thrust is half of weight
                 ).to(self.device)
             elif thrust_normalize_method == "max_min":
                 thrust_normalizer = Uniform.from_min_max(
@@ -624,14 +637,15 @@ class Dynamics:
             )
 
     def _de_normalize(self, action):
-        """_summary_
+        """
             de-normalize the command to the real value
         Args:
             command torch.Tensor: shape (N, 4)
                 1. with normed values in range [-1, 1]
                 2. with the semantic order of [thrust/m, bodyrate_x, bodyrate_y, bodyrate_z]
         Returns:
-            _type_: _description_
+            command torch.Tensor: shape (N, 4)
+                with real values
         """
         if not isinstance(action, torch.Tensor):
             return self._de_normalize(torch.from_numpy(action))

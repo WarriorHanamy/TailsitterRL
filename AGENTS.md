@@ -24,6 +24,6 @@
 
 ## Commit & Pull Request Guidelines
 - Keep commit subjects imperative and concise (e.g., `Add hover reward guard`), adding deeper context in the body when behaviour changes.
-- Confirm `uv run pytest` succeed before pushing; include reproduction commands, new fixtures, and checklist updates in the PR description.
+- Confirm `UV_CACHE_DIR=.uv_cache uv run pytest uv run pytest` succeed before pushing; include reproduction commands, new fixtures, and checklist updates in the PR description.
 - Update `ToDos.md` checkboxes as tasks complete, leaving items unchecked until the work is fully delivered.
 - Highlight cross-module impacts—especially config updates that influence training scripts—to guide reviewers toward targeted verification.
