@@ -606,6 +606,63 @@ class Integrator:
         else:
             raise ValueError("type should be one of ['euler', 'rk4']")
 
+    @staticmethod
+    def integrate_surrogate(
+        pos: torch.tensor,
+        ori: torch.tensor,
+        vel: torch.tensor,
+        ori_vel: torch.tensor,
+        acc: torch.tensor,
+        tau: torch.tensor,
+        J: torch.tensor,
+        J_inv: torch.tensor,
+        dt: torch.tensor,
+        type="1st_order_euler",
+    ):
+        """
+        Args:
+            (pos, ori, vel, ori_vel): current state, shape (N, 3), (N, 4), (N, 3), (N, 3)
+            acc: linear acceleration in world frame, shape (N, 3)
+            tau: torque in body frame, shape (N, 3)
+            J: inertia matrix in body frame, shape (3, 3)
+                Future work: to be batched, add domain randomization
+            J_inv: inverse of inertia matrix in body frame, shape (3, 3)
+                Future work: to be batched, add domain randomization
+            dt: time step, shape (1,) or scalar
+            type: integration method, one of ['1st_order_euler', 'rk4']
+        Returns:
+            (pos, ori, vel, ori_vel): next state, shape (N, 3), (N, 4), (N, 3), (N, 3)
+            d_ori_vel: angular acceleration in body frame, shape (N, 3)
+
+        """
+        if type == "1st_order_euler":
+            _, ori_cache, vel_cache, ori_vel_cache = (
+                pos.clone(),
+                ori.clone(),
+                vel.clone(),
+                ori_vel.clone(),
+            )
+
+            d_pos, d_ori, d_vel, d_ori_vel = Integrator._get_derivatives(
+                vel=vel_cache,
+                ori=ori_cache,
+                acc=acc,
+                ori_vel=ori_vel_cache,
+                tau=tau,
+                J=J,
+                J_inv=J_inv,
+            )
+            pos += d_pos * dt
+            ori += d_ori * dt
+            ori = ori / ori.norm()
+
+            vel += d_vel * dt
+            ori_vel += d_ori_vel * dt
+
+            # ori = ori / ori.norm()
+
+            return pos, ori, vel, ori_vel, d_ori_vel
+
 
 def cross(a: torch.Tensor, b: torch.Tensor):
     res = (

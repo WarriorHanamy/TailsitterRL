@@ -393,10 +393,9 @@ class Dynamics:
             self._pre_action.append(action.clone())
             action = self._pre_action.pop(0)
 
-        command = self._de_normalize(action)
-        # print(f"command: {command.shape} {command}")
+        command = self._de_normalize(action)  # command is actual [T, bodyrate_x,y,z]
+
         thrust_des = self._get_thrust_from_cmd(command)  #
-        assert (thrust_des <= self._bd_thrust.max).all()  # debug
 
         for _ in range(self._interval_steps):
             # thrust_des = self._get_thrust_from_cmd(command)
@@ -414,9 +413,11 @@ class Dynamics:
             drag = linear_drag + quadratic_drag
             # drag = self._drag_coeffs * (self._orientation.inv_rotate(self._velocity - 0).pow(2))
             thrust_body = Dynamics.z * force_torque[:, 0].unsqueeze(1)
-            total_force_body = thrust_body - drag
+            proper_force_body = thrust_body - drag
             gravity = Dynamics.g
-            self._acc = self._orientation.rotate(total_force_body) / self.m + gravity
+            self._acc = self._orientation.rotate(proper_force_body) / self.m + gravity
+
+            acc_noise = torch.randn_like(self._acc) * 0.5
 
             torque = force_torque[:, 1:]
 
@@ -432,14 +433,14 @@ class Dynamics:
                 ori=self._orientation,
                 vel=self._velocity,
                 ori_vel=self._angular_velocity,
-                acc=self._acc,
+                acc=self._acc + acc_noise,
                 tau=torque,
                 J=self._inertia,
                 J_inv=self._inertia_inv,
                 dt=self.sim_time_step,
                 type=self._integrator,
             )
-            self._orientation = self._orientation.normalize()
+
         self._t += self.ctrl_period
 
         self._ugly_fix()  # Re-enabled to prevent position explosion
