@@ -41,6 +41,7 @@ dev-dependencies = [
   "ruff",
   "pre-commit",
   "pytest>=7.0",
+  "pytest-cov",
 ]
 
 [tool.pytest.ini_options]

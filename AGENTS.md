@@ -1,16 +1,23 @@
+# Philosophy
+The goal of `vtol_rl` is to provide a vectorized dynamics training framework:
+- Simple and concise if possible.
+- Vectorized if possible.
+- A consistent and predictable API.
+
+
 # Repository Guidelines
 
 ## Project Structure & Module Organization
 - `vtol_rl/` is the installable package; task environments sit in `envs/`, shared dynamics and controllers live in `envs/base/`, and tensor helpers reside in `utils/`.
 - JSON presets in `vtol_rl/config/` define aircraft, scenes, and objects—clone the closest sample, document new keys inline, and keep diffs targeted.
 - Tests mirror runtime scope: `vtol_rl/tests/` covers modules with unit checks, while top-level `tests/` executes system smoke scenarios.
-- Vendor code remains under `aerial_gym_simulator/`; treat modifications as upstream patches and summarise differences in pull requests.
+
 
 ## Build, Test, and Development Commands
 - `uv sync` provisions the virtual environment and resolves runtime plus dev dependencies; `environment.yml` is retained for future Conda/mamba needs but is not active.
 - `uv run python -m pip install -e .` keeps the package editable so code and tests stay in lockstep.
-- `uv run pytest` runs the entire suite; add `-k hover` or `--lf` when iterating inside the red→green cycle.
-- `UV_CACHE_DIR=.uv_cache PRE_COMMIT_HOME=.pre-commit-cache uv run pre-commit run --all-files` runs the pre-commit check as the last check.
+- `UV_CACHE_DIR=.uv_cache uv run pytest uv run pytest` runs the entire suite
+
 
 ## Test-Driven Development Workflow
 - Begin every feature or fix by writing or tightening a failing test that describes the intended behaviour at the smallest feasible scope.

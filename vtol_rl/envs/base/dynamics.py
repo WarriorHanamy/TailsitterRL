@@ -5,7 +5,6 @@ from vtol_rl.utils.maths import Integrator, Quaternion
 from vtol_rl.utils.type import ACTION_TYPE, PID, Uniform, action_type_alias, bound
 
 
-# These will be moved to the correct device in _set_device method
 class Dynamics:
     g = torch.tensor([[0, 0, -9.81]])  # gravity vector
     z = torch.tensor([[0, 0, 1]])  # upward vector
@@ -26,8 +25,6 @@ class Dynamics:
         drag_random: float = 0,
         cfg: str = "drone_state",
     ):
-        # assert action_type in ["bodyrate", "thrust", "velocity", "position"]
-        # assert ori_output_type in ["quaternion", "euler"]
         assert action_type in ["bodyrate"]
         assert ori_output_type in ["quaternion"]
 
@@ -148,11 +145,76 @@ class Dynamics:
 
         # Move PID controllers to the correct device
         self._BODYRATE_PID = self._BODYRATE_PID.to(device)
-        self._VELOCITY_PID = self._VELOCITY_PID.to(device)
-        self._POSITION_PID = self._POSITION_PID.to(device)
 
         Dynamics.z.to(device)
         Dynamics.g.to(device)
+
+    def _reset_batch_size(self, indices) -> int:
+        if indices is None:
+            return self.num
+        if isinstance(indices, torch.Tensor):
+            return int(indices.numel())
+        return len(indices)
+
+    def _coerce_reset_tensor(
+        self,
+        name: str,
+        value,
+        expected_feature_dim: int,
+        batch_size: int,
+    ) -> torch.Tensor | None:
+        if value is None:
+            return None
+
+        if isinstance(value, torch.Tensor):
+            tensor = value.to(device=self.device, dtype=torch.float32)
+        else:
+            tensor = torch.as_tensor(value, dtype=torch.float32, device=self.device)
+
+        if tensor.ndim != 2:
+            raise ValueError(
+                f"{name} must have shape (batch, {expected_feature_dim}); got tensor with {tensor.ndim} dims"
+            )
+
+        if tensor.shape[-1] != expected_feature_dim:
+            raise ValueError(
+                f"{name} must have shape (batch, {expected_feature_dim}); received {tuple(tensor.shape)}"
+            )
+
+        if tensor.shape[0] != batch_size:
+            raise ValueError(
+                f"{name} batch dimension must match number of indices ({batch_size}); received {tuple(tensor.shape)}"
+            )
+
+        return tensor.contiguous()
+
+    def _coerce_reset_times(
+        self,
+        value,
+        batch_size: int,
+    ) -> torch.Tensor | None:
+        if value is None:
+            return None
+
+        if isinstance(value, torch.Tensor):
+            tensor = value.to(device=self.device, dtype=torch.float32)
+        else:
+            tensor = torch.as_tensor(value, dtype=torch.float32, device=self.device)
+
+        if tensor.ndim == 2 and tensor.shape[-1] == 1:
+            tensor = tensor.squeeze(-1)
+
+        if tensor.ndim != 1:
+            raise ValueError(
+                f"t must have shape (batch,); received {tuple(tensor.shape)}"
+            )
+
+        if tensor.shape[0] != batch_size:
+            raise ValueError(
+                f"t batch dimension must match number of indices ({batch_size}); received {tuple(tensor.shape)}"
+            )
+
+        return tensor.contiguous()
 
     def reset(
         self,
@@ -165,34 +227,58 @@ class Dynamics:
         t: list | torch.Tensor | None = None,
         indices: list | None = None,
     ):
+        batch_size = self._reset_batch_size(indices)
+        pos_tensor = self._coerce_reset_tensor("pos", pos, 3, batch_size)
+        vel_tensor = self._coerce_reset_tensor("vel", vel, 3, batch_size)
+        ori_vel_tensor = self._coerce_reset_tensor("ori_vel", ori_vel, 3, batch_size)
+        motor_tensor = self._coerce_reset_tensor(
+            "motor_omega", motor_omega, 4, batch_size
+        )
+        thrust_tensor = self._coerce_reset_tensor("thrusts", thrusts, 4, batch_size)
+        ori_tensor = self._coerce_reset_tensor("ori", ori, 4, batch_size)
+        time_tensor = self._coerce_reset_times(t, batch_size)
+
         if indices is None:
             self._position = (
-                torch.zeros((self.num, 3), device=self.device) if pos is None else pos
+                torch.zeros((self.num, 3), device=self.device)
+                if pos_tensor is None
+                else pos_tensor
             )
             self._orientation = (
                 Quaternion(num=self.num, device=self.device)
-                if ori is None
-                else Quaternion(ori[:, 0], ori[:, 1], ori[:, 2], ori[:, 3])
+                if ori_tensor is None
+                else Quaternion(
+                    ori_tensor[:, 0],
+                    ori_tensor[:, 1],
+                    ori_tensor[:, 2],
+                    ori_tensor[:, 3],
+                )
             )
             self._velocity = (
-                torch.zeros((self.num, 3), device=self.device) if vel is None else vel
+                torch.zeros((self.num, 3), device=self.device)
+                if vel_tensor is None
+                else vel_tensor
             )
             self._angular_velocity = (
                 torch.zeros((self.num, 3), device=self.device)
-                if ori_vel is None
-                else ori_vel
+                if ori_vel_tensor is None
+                else ori_vel_tensor
             )
             self._thrusts = (
                 torch.ones((self.num, 4), device=self.device) * self._init_thrust_mag
-                if thrusts is None
-                else thrusts
+                if thrust_tensor is None
+                else thrust_tensor
             )
             self._motor_omega = (
                 torch.ones((self.num, 4), device=self.device) * self._init_motor_omega
-                if motor_omega is None
-                else motor_omega
+                if motor_tensor is None
+                else motor_tensor
             )
-            self._t = torch.zeros((self.num,), device=self.device) if t is None else t
+            self._t = (
+                torch.zeros((self.num,), device=self.device)
+                if time_tensor is None
+                else time_tensor
+            )
 
             self._angular_acc = torch.zeros((self.num, 3), device=self.device)
             self._acc = torch.zeros((self.num, 3), device=self.device)
@@ -219,52 +305,53 @@ class Dynamics:
                 )
 
         else:
+            idx_count = batch_size
             self._position[indices, :] = (
-                torch.zeros((len(indices), 3), device=self.device)
-                if pos is None
-                else pos.T
+                torch.zeros((idx_count, 3), device=self.device)
+                if pos_tensor is None
+                else pos_tensor
             )
             self._orientation[indices] = (
-                Quaternion(num=len(indices), device=self.device)
-                if ori is None
-                else Quaternion(*ori.T)
+                Quaternion(num=idx_count, device=self.device)
+                if ori_tensor is None
+                else ori_tensor
             )
             self._velocity[indices, :] = (
-                torch.zeros((len(indices), 3), device=self.device)
-                if vel is None
-                else vel.T
+                torch.zeros((idx_count, 3), device=self.device)
+                if vel_tensor is None
+                else vel_tensor
             )
             self._angular_velocity[indices, :] = (
-                torch.zeros((len(indices), 3), device=self.device)
-                if ori_vel is None
-                else ori_vel.T
+                torch.zeros((idx_count, 3), device=self.device)
+                if ori_vel_tensor is None
+                else ori_vel_tensor
             )
             self._motor_omega[indices, :] = (
-                torch.ones((len(indices), 4), device=self.device)
-                * self._init_motor_omega
-                if motor_omega is None
-                else motor_omega.T
+                torch.ones((idx_count, 4), device=self.device) * self._init_motor_omega
+                if motor_tensor is None
+                else motor_tensor
             )
             self._thrusts[indices, :] = (
-                torch.ones((len(indices), 4), device=self.device)
-                * self._init_thrust_mag
-                if thrusts is None
-                else thrusts.T
+                torch.ones((idx_count, 4), device=self.device) * self._init_thrust_mag
+                if thrust_tensor is None
+                else thrust_tensor
             )
             self._t[indices] = (
-                torch.zeros((len(indices),), device=self.device) if t is None else t
+                torch.zeros((idx_count,), device=self.device)
+                if time_tensor is None
+                else time_tensor
             )
             self._t[indices] = (
-                torch.zeros((len(indices),), device=self.device)
-                + torch.rand((len(indices),)) * 3.14 * 2
-                if t is None
-                else t
+                torch.zeros((idx_count,), device=self.device)
+                + torch.rand((idx_count,)) * 3.14 * 2
+                if time_tensor is None
+                else time_tensor
             )
 
             self._angular_acc[indices, :] = torch.zeros(
-                (len(indices), 3), device=self.device
+                (idx_count, 3), device=self.device
             )
-            self._acc[indices, :] = torch.zeros((len(indices), 3), device=self.device)
+            self._acc[indices, :] = torch.zeros((idx_count, 3), device=self.device)
             for i in range(self._comm_delay_steps):
                 self._pre_action[i][indices] = 0
 
@@ -293,61 +380,7 @@ class Dynamics:
 
         return self.state
 
-    def _normalize(self, action):
-        """
-        Normalize the action from real values to [-1, 1] range
-        This function is used only for ROS node !!!
-
-        Args:
-            action: Real action values to be normalized
-
-        Returns:
-            Normalized action in [-1, 1] range
-        """
-        if not isinstance(action, torch.Tensor):
-            action = torch.from_numpy(action)
-
-        action = action.clone()
-
-        if self.action_type == ACTION_TYPE.BODYRATE:
-            # action format: [thrust/m, bodyrate_x, bodyrate_y, bodyrate_z]
-            normalized = torch.hstack(
-                [
-                    (action[:, :1] / self.m - self._normals["thrust"].mean)
-                    / self._normals["thrust"].radius,
-                    (action[:, 1:] - self._normals["bodyrate"].mean)
-                    / self._normals["bodyrate"].radius,
-                ]
-            )
-            return normalized
-        else:
-            raise ValueError(f"Unsupported action_type: {self.action_type}")
-
-    def _ensure_action_tensor(self, action) -> torch.Tensor:
-        """Validate and reshape actions to (num_agents, 4)."""
-        if not isinstance(action, torch.Tensor):
-            action = torch.as_tensor(action, dtype=torch.float32)
-        elif action.dtype != torch.float32:
-            action = action.to(dtype=torch.float32)
-
-        if action.ndim == 1:
-            action = action.unsqueeze(0)
-        elif action.ndim == 3 and action.size(-1) == 1:
-            action = action.squeeze(-1)
-
-        if action.ndim != 2 or action.size(-1) != 4:
-            raise ValueError(
-                f"Action must have shape (N, 4); received tensor with shape {tuple(action.shape)}"
-            )
-
-        if action.size(0) != self.num:
-            raise ValueError(
-                f"Action batch dimension {action.size(0)} does not match number of agents {self.num}"
-            )
-
-        return action.contiguous()
-
-    def step(self, action) -> tuple[torch.Tensor, torch.Tensor]:
+    def step(self, action: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Step the simulation forward by one control period given the action.
         Args:
@@ -355,7 +388,6 @@ class Dynamics:
         Returns:
             state (torch.Tensor): shape (N, 13): (p,q,v,r)
         """
-        action = self._ensure_action_tensor(action).to(self.device)
 
         if self._comm_delay_steps:
             self._pre_action.append(action.clone())
@@ -424,33 +456,21 @@ class Dynamics:
         self._angular_velocity = self._angular_velocity.clamp(-10, 10)
 
     def _get_thrust_from_cmd(self, command) -> torch.Tensor:
-        """_summary_
-            get the single _thrusts from the command
-        Args:
-            command (_type_): _description_
-
-        Returns:
-            _type_: _description_
         """
-        if self.action_type == ACTION_TYPE.THRUST:
-            thrusts_des = command
-        # REC MARK: I remove position and velocity control for simplicity
-        elif self.action_type == ACTION_TYPE.BODYRATE:
+        Args:
+            command: shape (N, 4)
+        Returns:
+            thrusts_des: shape (N, 4)
+        """
+
+        if self.action_type == ACTION_TYPE.BODYRATE:
             angular_velocity_error = command[:, 1:] - self._angular_velocity
-            # self._ctrl_i += (self._BODYRATE_PID.i @ (angular_velocity_error * self.sim_time_step))
-            # self._ctrl_i = self._ctrl_i.clip(min=-3, max=3)
-            # TODO
+
             pid_p = self._BODYRATE_PID.p
-            if pid_p.ndim == 2:
-                p_term = angular_velocity_error @ pid_p.T
-            else:
-                p_term = pid_p * angular_velocity_error
+            p_term = angular_velocity_error @ pid_p.T
 
             pid_d = self._BODYRATE_PID.d
-            if pid_d.ndim == 2:
-                d_term = -(self._angular_acc @ pid_d.T)
-            else:
-                d_term = -pid_d * self._angular_acc
+            d_term = -(self._angular_acc @ pid_d.T)
 
             p_term_reshaped = p_term.unsqueeze(2)  # Shape becomes (N, 3, 1)
             inertia_reshaped = self._inertia.unsqueeze(0)  # Shape becomes (1, 3, 3)
@@ -464,14 +484,9 @@ class Dynamics:
                 [command[:, 0].unsqueeze(1), body_torque_des], dim=1
             )
 
-            # And now you can perform the final matrix multiplication.
-            # Since _B_allocation_inv is a 4x4 matrix, it needs to be multiplied with a (N,4) tensor.
-            # Using the `@` operator will work for this.
             thrusts_des = gross_thrust_and_torques @ self._B_allocation_inv.T
         else:
-            raise ValueError(
-                "action_type should be one of ['thrust', 'bodyrate', 'velocity', 'position']"
-            )
+            raise ValueError("action_type should be one of ['bodyrate']")
 
         clamp_thrusts_des = torch.clamp(
             thrusts_des, self._bd_thrust.min, self._bd_thrust.max
@@ -562,16 +577,7 @@ class Dynamics:
             i=torch.tensor(data["BODYRAYE_PID"]["i"]),
             d=torch.tensor(data["BODYRAYE_PID"]["d"]),
         )
-        self._VELOCITY_PID = PID(
-            p=torch.tensor(data["VELOCITY_PID"]["p"]),
-            i=torch.tensor(data["VELOCITY_PID"]["i"]),
-            d=torch.tensor(data["VELOCITY_PID"]["d"]),
-        )
-        self._POSITION_PID = PID(
-            p=torch.tensor(data["POSITION_PID"]["p"]),
-            i=torch.tensor(data["POSITION_PID"]["i"]),
-            d=torch.tensor(data["POSITION_PID"]["d"]),
-        )
+
         self._kappa = torch.tensor(data["kappa"])
         self._arm_length = torch.tensor(data["arm_length"])
         self._rotor_speed_to_thrust_coefs = torch.tensor(
@@ -636,7 +642,7 @@ class Dynamics:
                 "action_type should be one of ['thrust', 'bodyrate', 'velocity']"
             )
 
-    def _de_normalize(self, action):
+    def _de_normalize(self, action: torch.Tensor) -> torch.Tensor:
         """
             de-normalize the command to the real value
         Args:
@@ -647,9 +653,6 @@ class Dynamics:
             command torch.Tensor: shape (N, 4)
                 with real values
         """
-        if not isinstance(action, torch.Tensor):
-            return self._de_normalize(torch.from_numpy(action))
-
         # REC MARK: we choose this order [T, bx, by, bz]
         # REC MARK: Assume commands are in shape (N, 4)
         if self.action_type == ACTION_TYPE.BODYRATE:

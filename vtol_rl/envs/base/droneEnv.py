@@ -213,9 +213,15 @@ class DroneEnvsBase:
         if state is not None:
             if isinstance(state, torch.Tensor):
                 state = state.to(self.device)
-                pos, ori, vel, ori_vel, motor_speed, thrust, t = torch.split(
-                    state.clone().detach(), [3, 4, 3, 3, 4, 4, 1]
-                )
+                (
+                    pos,
+                    ori,
+                    vel,
+                    ori_vel,
+                    motor_speed,
+                    thrust,
+                    t,
+                ) = torch.split(state.clone().detach(), [3, 4, 3, 3, 4, 4, 1], dim=1)
         else:
             pos, ori, vel, ori_vel = self._generate_state(indices)
 

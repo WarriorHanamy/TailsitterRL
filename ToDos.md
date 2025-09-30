@@ -1,5 +1,5 @@
 # To-Dos
-
+- [x] Remove the compatibility for shape of (n_feats, N) in Integrator in dymamics.py, and pass tests.
 - [x] Fix orientation property to return (N, 4) tensors from Quaternion storage.
 - [x] Ensure Dynamics stores orientation as Quaternion objects throughout lifecycle.
 - [x] Keep denormalized commands in (N, 4) shape when computing thrust inputs.
@@ -29,3 +29,4 @@
         """
 ```
 You should compare all shape returned is predictably and first write test in vtol_rl/test folder.
+- [x] Add shape guards to `Dynamics.reset` while keeping compute-bound paths (e.g., `step`) presuming `(N, …)` tensors; cover the new behaviour with regression tests.

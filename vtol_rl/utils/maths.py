@@ -490,42 +490,12 @@ class Integrator:
         J_inv: torch.tensor,
     ):
         d_pos = vel
-
-        batch_size = vel.shape[0]
-        if isinstance(ori_vel, torch.Tensor):
-            if ori_vel.ndim == 1:
-                omega = ori_vel.unsqueeze(0)
-            elif ori_vel.ndim == 2:
-                if ori_vel.shape[1] == 3:
-                    omega = ori_vel
-                elif ori_vel.shape[0] == 3 and ori_vel.shape[1] == batch_size:
-                    omega = ori_vel.T
-                else:
-                    raise ValueError(
-                        "ori_vel tensor must have shape (N, 3) or (3, N) to represent batch angular velocities"
-                    )
-            else:
-                raise ValueError("ori_vel tensor must be 1D or 2D")
-        else:
-            raise TypeError("ori_vel must be a torch.Tensor")
-
+        omega = ori_vel
         zeros = torch.zeros(omega.shape[0], device=omega.device, dtype=omega.dtype)
         omega_quat = Quaternion(zeros, omega[:, 0], omega[:, 1], omega[:, 2])
         d_q = (ori * omega_quat * 0.5).toTensor()
         d_vel = acc
-
-        if tau.ndim == 1:
-            tau_tensor = tau.unsqueeze(0)
-        elif tau.ndim == 2:
-            if tau.shape[1] == 3:
-                tau_tensor = tau
-            elif tau.shape[0] == 3 and tau.shape[1] == batch_size:
-                tau_tensor = tau.T
-            else:
-                raise ValueError("tau tensor must have shape (N, 3) or (3, N)")
-        else:
-            raise ValueError("tau tensor must be 1D or 2D")
-
+        tau_tensor = tau
         J_omega = omega @ J.T
         coriolis = torch.linalg.cross(omega, J_omega, dim=1)
         d_ori_vel = (tau_tensor - coriolis) @ J_inv.T
