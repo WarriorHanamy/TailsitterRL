@@ -33,13 +33,15 @@ class Dynamics:
         # iterative variables
         self.num: int = num
         self._position: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
-        self._orientation: Quaternion = Quaternion(num=self.num, device=self.device)
+        self._orientation: Quaternion = Quaternion(
+            num=self.num, device=self.device
+        ).toTensor()
         self._velocity: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
         self._angular_velocity: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
-        self._motor_omega: torch.Tensor = torch.Tensor(self.num, 4).to(self.device)
-        self._thrusts: torch.Tensor = torch.Tensor(self.num, 4).to(self.device)
         self._acc: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
+        self._acc_thrust: torch.Tensor = torch.Tensor(self.num, 1).to(self.device)
         self._angular_acc: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
+        self._angular_jerk: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
         self._t: torch.Tensor = torch.zeros((self.num,), device=self.device)
 
         self.action_type = action_type_alias[action_type]
@@ -554,6 +556,33 @@ class Dynamics:
         )  # positive soluitno of quadratic formula
         return omega
 
+    # def get_derivatives(self, command: torch.Tensor) -> tuple[torch.Tensor]:
+    #     """
+    #     Compute the state derivatives given the current state and action.
+    #     Args:
+    #         command (torch.Tensor): shape (N, 4), in range [almost g+std(.5g), bodyrate~Uniform(-_bd_rate, _bd_rate)]
+    #     Returns:
+    #         state_dot (torch.Tensor): shape (N, 13)
+    #         in the following order:
+    #             pos_dot (torch.Tensor): shape (N, 3)
+    #             ori_dot (torch.Tensor): shape (N, 4)
+    #             vel_dot (torch.Tensor): shape (N, 3)
+    #             ang_vel_dot (torch.Tensor): shape (N, 3)
+    #     """
+    #     pos_dot = self._velocity
+    #     zeros = torch.zeros((self.num,), device=self.device)
+    #     omega_quat = Quaternion(
+    #         zeros,
+    #         self._angular_velocity[:, 0],
+    #         self._angular_velocity[:, 1],
+    #         self._angular_velocity[:, 2],
+    #     ).toTensor()
+    #     ori_dot = (0.5 * self._orientation * omega_quat).toTensor()
+    #     acc_T_cmd = command[:, :1]  # thrust/m
+    #     bodyrate_cmd = command[:, 1:]  # bodyrate_x,y,z
+
+    #     vel_dot = self._acc + torch.randn_like(self._acc) * 0.5
+
     def set_seed(self, seed=42):
         torch.manual_seed(seed)
 
@@ -621,7 +650,7 @@ class Dynamics:
             if thrust_normalize_method == "medium":
                 thrust_normalizer = Uniform(
                     mean=g_val,
-                    radius=0.5 * g_val,  # hover thrust is half of weight
+                    radius=0.9 * g_val,  # hover thrust is half of weight
                 ).to(self.device)
             elif thrust_normalize_method == "max_min":
                 thrust_normalizer = Uniform.from_min_max(
@@ -632,7 +661,7 @@ class Dynamics:
                     "thrust_normalize_method should be one of ['medium', 'max_min']"
                 )
             self._normals = {
-                "thrust": thrust_normalizer,
+                "acc_thrust": thrust_normalizer,
                 "bodyrate": Uniform.from_min_max(
                     self._bd_rate.min, self._bd_rate.max
                 ).to(self.device),
@@ -659,7 +688,7 @@ class Dynamics:
         if self.action_type == ACTION_TYPE.BODYRATE:
             command = torch.cat(
                 [
-                    self._normals["thrust"].per_sample_denormalize(action[:, :1]),
+                    self._normals["acc_thrust"].per_sample_denormalize(action[:, :1]),
                     self._normals["bodyrate"].per_sample_denormalize(action[:, 1:]),
                 ],
                 dim=1,
@@ -714,10 +743,6 @@ class Dynamics:
         Returns:
             acc: shape (N, 3)
         """
-        if self._acc is None:
-            return torch.zeros(
-                (self.num, 3), device=self.device, dtype=self._position.dtype
-            )
         return self._acc
 
     @property
@@ -726,12 +751,9 @@ class Dynamics:
         Returns:
             angular_acc: shape (N, 3)
         """
-        if self._angular_acc is None:
-            return torch.zeros(
-                (self.num, 3), device=self.device, dtype=self._position.dtype
-            )
         return self._angular_acc
 
+    @property
     @property
     def t(self):
         """

@@ -163,3 +163,16 @@ utils/
 
 trys/
 .pre-commit-cache/
+
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.svg
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wmv

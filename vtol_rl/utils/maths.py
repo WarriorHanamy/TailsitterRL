@@ -608,16 +608,9 @@ class Integrator:
 
     @staticmethod
     def integrate_surrogate(
-        pos: torch.tensor,
-        ori: torch.tensor,
-        vel: torch.tensor,
-        ori_vel: torch.tensor,
-        acc: torch.tensor,
-        tau: torch.tensor,
-        J: torch.tensor,
-        J_inv: torch.tensor,
+        state: torch.tensor,
+        state_dot: torch.tensor,
         dt: torch.tensor,
-        type="1st_order_euler",
     ):
         """
         Args:
@@ -635,33 +628,17 @@ class Integrator:
             d_ori_vel: angular acceleration in body frame, shape (N, 3)
 
         """
-        if type == "1st_order_euler":
-            _, ori_cache, vel_cache, ori_vel_cache = (
-                pos.clone(),
-                ori.clone(),
-                vel.clone(),
-                ori_vel.clone(),
-            )
 
-            d_pos, d_ori, d_vel, d_ori_vel = Integrator._get_derivatives(
-                vel=vel_cache,
-                ori=ori_cache,
-                acc=acc,
-                ori_vel=ori_vel_cache,
-                tau=tau,
-                J=J,
-                J_inv=J_inv,
-            )
-            pos += d_pos * dt
-            ori += d_ori * dt
-            ori = ori / ori.norm()
+        state = state + state_dot * dt
 
-            vel += d_vel * dt
-            ori_vel += d_ori_vel * dt
+        state[:, 3:7] = state[:, 3:7] / state[:, 3:7].norm(dim=1, keepdim=True)
 
-            # ori = ori / ori.norm()
+        pos = state[:, 0:3]
+        ori = state[:, 3:7]
+        vel = state[:, 7:10]
+        ori_vel = state[:, 10:13]
 
-            return pos, ori, vel, ori_vel, d_ori_vel
+        return pos, ori, vel, ori_vel, ori_vel
 
 
 def cross(a: torch.Tensor, b: torch.Tensor):

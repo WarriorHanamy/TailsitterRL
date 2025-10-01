@@ -14,7 +14,7 @@ $
 
 == Standardized Control System Form
 $
-  dot.double(x) + 2 zeta omega_n dot(x) + omega_n^2 x = u (t)
+  dot.double(x) + 2 zeta omega_n dot(x) + omega_n^2 x = omega_n^2 u (t)
 $
 where, $omega_n = sqrt(k/m)$, $zeta = b/(2 sqrt(m k))$
 
@@ -84,12 +84,10 @@ $
   &=(1-2zeta omega_n Delta t) DotBodyRateB_k - omega_n^2 Delta t BodyRateB_k + omega_n^2 Delta t u_k
 $
 
-if take $
-          z = mat(
-            BodyRateB;
-            DotBodyRateB
-          )
-        $
+if take $ z = mat(
+  BodyRateB;
+  DotBodyRateB
+) $
 , then
 $
   z_(k+1) = A z_k + B u_k
