@@ -382,6 +382,38 @@ class Dynamics:
 
         return self.state
 
+    def get_derivatives(
+        self,
+        pos: torch.Tensor,
+        ori: Quaternion,
+        vel: torch.Tensor,
+        ori_vel: torch.Tensor,
+        *,
+        acc: torch.Tensor,
+        tau: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Compute state derivatives for the current dynamics model.
+
+        Args:
+            pos: position in world frame, shape (N, 3)
+            ori: orientation quaternion, Quaternion
+            vel: linear velocity in world frame, shape (N, 3)
+            ori_vel: angular velocity in body frame, shape (N, 3)
+            acc: linear acceleration in world frame, shape (N, 3)
+            tau: body-frame torque, shape (N, 3)
+        """
+        d_pos = vel
+        omega = ori_vel
+        zeros = torch.zeros(omega.shape[0], device=omega.device, dtype=omega.dtype)
+        omega_quat = Quaternion(zeros, omega[:, 0], omega[:, 1], omega[:, 2])
+        d_ori = (ori * omega_quat * 0.5).toTensor()
+        d_vel = acc
+        J_omega = omega @ self._inertia.T
+        coriolis = torch.linalg.cross(omega, J_omega, dim=1)
+        d_ori_vel = (tau - coriolis) @ self._inertia_inv.T
+        return d_pos, d_ori, d_vel, d_ori_vel
+
     def step(self, action: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Step the simulation forward by one control period given the action.
@@ -424,6 +456,19 @@ class Dynamics:
             torque = force_torque[:, 1:]
 
             # integrate the state
+            acc_total = self._acc + acc_noise
+            torque_total = torque
+
+            def derivatives_fn(*, pos, ori, vel, ori_vel):
+                return self.get_derivatives(
+                    pos=pos,
+                    ori=ori,
+                    vel=vel,
+                    ori_vel=ori_vel,
+                    acc=acc_total,
+                    tau=torque_total,
+                )
+
             (
                 self._position,
                 self._orientation,
@@ -435,12 +480,9 @@ class Dynamics:
                 ori=self._orientation,
                 vel=self._velocity,
                 ori_vel=self._angular_velocity,
-                acc=self._acc + acc_noise,
-                tau=torque,
-                J=self._inertia,
-                J_inv=self._inertia_inv,
                 dt=self.sim_time_step,
                 type=self._integrator,
+                get_derivatives=derivatives_fn,
             )
 
         self._t += self.ctrl_period

@@ -1,3 +1,5 @@
+from typing import Callable
+
 import torch
 
 
@@ -476,76 +478,44 @@ class Quaternion:
 
 
 class Integrator:
-    def __init__(self):
-        pass
-
-    @staticmethod
-    def _get_derivatives(
-        vel: torch.tensor,
-        ori: torch.tensor,
-        acc: torch.tensor,
-        ori_vel: torch.tensor,
-        tau: torch.tensor,
-        J: torch.tensor,
-        J_inv: torch.tensor,
-    ):
-        d_pos = vel
-        omega = ori_vel
-        zeros = torch.zeros(omega.shape[0], device=omega.device, dtype=omega.dtype)
-        omega_quat = Quaternion(zeros, omega[:, 0], omega[:, 1], omega[:, 2])
-        d_q = (ori * omega_quat * 0.5).toTensor()
-        d_vel = acc
-        tau_tensor = tau
-        J_omega = omega @ J.T
-        coriolis = torch.linalg.cross(omega, J_omega, dim=1)
-        d_ori_vel = (tau_tensor - coriolis) @ J_inv.T
-        return d_pos, d_q, d_vel, d_ori_vel
-
     @staticmethod
     def integrate(
-        pos: torch.tensor,
-        ori: torch.tensor,
-        vel: torch.tensor,
-        ori_vel: torch.tensor,
-        acc: torch.tensor,
-        tau: torch.tensor,
-        J: torch.tensor,
-        J_inv: torch.tensor,
-        dt: torch.tensor,
+        pos: torch.Tensor,
+        ori: "Quaternion",
+        vel: torch.Tensor,
+        ori_vel: torch.Tensor,
+        dt: torch.Tensor | float,
+        *,
+        get_derivatives: Callable[..., tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
         type="1st_order_euler",
     ):
         """
         Args:
             (pos, ori, vel, ori_vel): current state, shape (N, 3), (N, 4), (N, 3), (N, 3)
-            acc: linear acceleration in world frame, shape (N, 3)
-            tau: torque in body frame, shape (N, 3)
-            J: inertia matrix in body frame, shape (3, 3)
-                Future work: to be batched, add domain randomization
-            J_inv: inverse of inertia matrix in body frame, shape (3, 3)
-                Future work: to be batched, add domain randomization
             dt: time step, shape (1,) or scalar
+            get_derivatives: callable returning (d_pos, d_ori, d_vel, d_ori_vel)
             type: integration method, one of ['1st_order_euler', 'rk4']
         Returns:
             (pos, ori, vel, ori_vel): next state, shape (N, 3), (N, 4), (N, 3), (N, 3)
             d_ori_vel: angular acceleration in body frame, shape (N, 3)
 
         """
-        if type == "1st_order_euler":
-            _, ori_cache, vel_cache, ori_vel_cache = (
-                pos.clone(),
-                ori.clone(),
-                vel.clone(),
-                ori_vel.clone(),
+        if get_derivatives is None:
+            raise ValueError(
+                "Integrator.integrate requires a get_derivatives callable."
             )
 
-            d_pos, d_ori, d_vel, d_ori_vel = Integrator._get_derivatives(
-                vel=vel_cache,
+        if type == "1st_order_euler":
+            pos_cache = pos.clone()
+            ori_cache = ori.clone()
+            vel_cache = vel.clone()
+            ori_vel_cache = ori_vel.clone()
+
+            d_pos, d_ori, d_vel, d_ori_vel = get_derivatives(
+                pos=pos_cache,
                 ori=ori_cache,
-                acc=acc,
+                vel=vel_cache,
                 ori_vel=ori_vel_cache,
-                tau=tau,
-                J=J,
-                J_inv=J_inv,
             )
             pos += d_pos * dt
             ori += d_ori * dt
@@ -559,18 +529,40 @@ class Integrator:
             return pos, ori, vel, ori_vel, d_ori_vel
 
         elif type == "rk4":
-            ks = torch.tensor([1.0, 2.0, 2.0, 1.0]) / 6
-            slice_ts = torch.tensor([0.5, 0.5, 1])
-            _, ori_cache, vel_cache, ori_vel_cache = (
-                pos.clone(),
-                ori.clone(),
-                vel.clone(),
-                ori_vel.clone(),
+            ks = torch.tensor(
+                [1.0, 2.0, 2.0, 1.0],
+                device=pos.device,
+                dtype=pos.dtype,
+            ) / 6
+            slice_ts = torch.tensor(
+                [0.5, 0.5, 1.0],
+                device=pos.device,
+                dtype=pos.dtype,
             )
-            d_pos = torch.zeros((pos.shape[0], pos.shape[1], 4))
-            d_ori = torch.zeros((ori.shape[0], ori.shape[1], 4))
-            d_vel = torch.zeros((vel.shape[0], vel.shape[1], 4))
-            d_ori_vel = torch.zeros((ori_vel.shape[0], ori_vel.shape[1], 4))
+            pos_cache = pos.clone()
+            ori_cache = ori.clone()
+            vel_cache = vel.clone()
+            ori_vel_cache = ori_vel.clone()
+            d_pos = torch.zeros(
+                (pos.shape[0], pos.shape[1], 4),
+                device=pos.device,
+                dtype=pos.dtype,
+            )
+            d_ori = torch.zeros(
+                (ori.shape[0], ori.shape[1], 4),
+                device=ori.real.device,
+                dtype=ori.real.dtype,
+            )
+            d_vel = torch.zeros(
+                (vel.shape[0], vel.shape[1], 4),
+                device=vel.device,
+                dtype=vel.dtype,
+            )
+            d_ori_vel = torch.zeros(
+                (ori_vel.shape[0], ori_vel.shape[1], 4),
+                device=ori_vel.device,
+                dtype=ori_vel.dtype,
+            )
 
             for index in range(4):
                 # pos_cache = pos + d_pos * slice_ts[index] * dt
@@ -580,20 +572,20 @@ class Integrator:
                     ori_vel_cache = (
                         ori_vel + d_ori_vel[:, :, index - 1] * slice_ts[index - 1] * dt
                     )
+                    pos_cache = (
+                        pos + d_pos[:, :, index - 1] * slice_ts[index - 1] * dt
+                    )
 
                 (
                     d_pos[:, :, index],
                     d_ori[:, :, index],
                     d_vel[:, :, index],
                     d_ori_vel[:, :, index],
-                ) = Integrator._get_derivatives(
-                    vel=vel_cache,
+                ) = get_derivatives(
+                    pos=pos_cache,
                     ori=ori_cache,
-                    acc=acc,
+                    vel=vel_cache,
                     ori_vel=ori_vel_cache,
-                    tau=tau,
-                    J=J,
-                    J_inv=J_inv,
                 )
             # f"w_cache: {ori_vel_cache} quat:{ori_cache} d_ori:{d_ori[:,:,index]}"
             pos += d_pos @ ks * dt
