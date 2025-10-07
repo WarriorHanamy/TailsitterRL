@@ -32,6 +32,8 @@ class Dynamics:
         integrator: str = "euler",
         drag_random: float = 0.0,
         cfg: str = "drone_state",
+        acc_noise_std: float = 0.5,
+        state_clamp: bool = True,
     ):
         if action_type not in ("bodyrate",):
             raise ValueError("Only 'bodyrate' action type is supported.")
@@ -63,6 +65,8 @@ class Dynamics:
         self.cfg = cfg
         self._drag_random = float(drag_random)
         self.action_space = action_space
+        self._acc_noise_std_value = float(acc_noise_std)
+        self._enable_state_clamp = bool(state_clamp)
 
         self.set_seed(seed)
 
@@ -153,7 +157,9 @@ class Dynamics:
         self._zeta = torch.cat([zeta_xy, zeta_z]).view(1, 3)
         self._omega_n = torch.cat([omega_n_xy, omega_n_z]).view(1, 3)
 
-        self._acc_noise_std = torch.tensor(0.5, device=self.device, dtype=self.dtype)
+        self._acc_noise_std = torch.tensor(
+            self._acc_noise_std_value, device=self.device, dtype=self.dtype
+        )
 
     def _init_state_tensors(self) -> None:
         self._position = torch.zeros((self.num, 3), device=self.device, dtype=self.dtype)
@@ -466,7 +472,8 @@ class Dynamics:
             self._update_linear_dynamics(self.sim_time_step)
 
         self._t += self.ctrl_period
-        self._ugly_fix()
+        if self._enable_state_clamp:
+            self._ugly_fix()
         return self.state
 
     def _update_thrust_state(self, target_thrust: torch.Tensor, dt: float) -> None:

@@ -71,3 +71,9 @@ def test_dynamics_reset_accepts_time_column_vector():
     dyn.reset(t=times)
 
     torch.testing.assert_close(dyn.t, torch.zeros(dyn.num))
+
+
+def test_dynamics_allows_zero_noise_std():
+    dyn = Dynamics(num=1, acc_noise_std=0.0)
+    expected = torch.tensor(0.0, device=dyn.device, dtype=dyn._acc_noise_std.dtype)
+    assert torch.isclose(dyn._acc_noise_std, expected)

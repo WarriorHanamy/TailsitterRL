@@ -517,16 +517,15 @@ class Integrator:
                 vel=vel_cache,
                 ori_vel=ori_vel_cache,
             )
-            pos += d_pos * dt
-            ori += d_ori * dt
-            ori = ori / ori.norm()
 
-            vel += d_vel * dt
-            ori_vel += d_ori_vel * dt
+            pos_next = pos + d_pos * dt
+            ori_next = ori + d_ori * dt
+            ori_next = ori_next / ori_next.norm()
 
-            # ori = ori / ori.norm()
+            vel_next = vel + d_vel * dt
+            ori_vel_next = ori_vel + d_ori_vel * dt
 
-            return pos, ori, vel, ori_vel, d_ori_vel
+            return pos_next, ori_next, vel_next, ori_vel_next, d_ori_vel
 
         elif type == "rk4":
             ks = torch.tensor(
@@ -588,12 +587,14 @@ class Integrator:
                     ori_vel=ori_vel_cache,
                 )
             # f"w_cache: {ori_vel_cache} quat:{ori_cache} d_ori:{d_ori[:,:,index]}"
-            pos += d_pos @ ks * dt
-            ori += d_ori @ ks * dt
-            vel += d_vel @ ks * dt
-            ori_vel += d_ori_vel @ ks * dt
+            pos_next = pos + d_pos @ ks * dt
+            ori_next = ori + d_ori @ ks * dt
+            vel_next = vel + d_vel @ ks * dt
+            ori_vel_next = ori_vel + d_ori_vel @ ks * dt
 
-            return pos, ori, vel, ori_vel, d_ori_vel
+            ori_next = ori_next / ori_next.norm()
+
+            return pos_next, ori_next, vel_next, ori_vel_next, d_ori_vel
 
         else:
             raise ValueError("type should be one of ['euler', 'rk4']")
