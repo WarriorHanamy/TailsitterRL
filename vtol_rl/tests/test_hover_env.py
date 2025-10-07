@@ -12,10 +12,10 @@ def test_dynamics():
     assert dyn.velocity.shape == (2, 3)
     assert dyn.angular_velocity.shape == (2, 3)
     assert dyn.state.shape == (2, 13)
-    assert dyn.full_state.shape == (2, 22)
+    assert dyn.full_state.shape == (2, 17)
     dyn.reset()
     assert dyn.state.shape == (2, 13)
-    assert dyn.full_state.shape == (2, 22)
+    assert dyn.full_state.shape == (2, 17)
     tor_tensor = torch.Tensor(
         [
             [1.0, 0.0, 0.0, 0.0],

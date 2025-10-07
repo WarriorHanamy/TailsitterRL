@@ -226,17 +226,39 @@ class DroneEnvsBase:
         if state is not None:
             if isinstance(state, torch.Tensor):
                 state = state.to(self.device)
-                (
-                    pos,
-                    ori,
-                    vel,
-                    ori_vel,
-                    motor_speed,
-                    thrust,
-                    t,
-                ) = torch.split(state.clone().detach(), [3, 4, 3, 3, 4, 4, 1], dim=1)
+                state = state.clone().detach()
+                if state.shape[1] == 17:
+                    (
+                        pos,
+                        ori,
+                        vel,
+                        ori_vel,
+                        thrust_state,
+                        ang_vel_state,
+                    ) = torch.split(state, [3, 4, 3, 3, 1, 3], dim=1)
+                    motor_speed = None
+                    thrust = None
+                    t = None
+                elif state.shape[1] == 22:
+                    (
+                        pos,
+                        ori,
+                        vel,
+                        ori_vel,
+                        motor_speed,
+                        thrust,
+                        t,
+                    ) = torch.split(state, [3, 4, 3, 3, 4, 4, 1], dim=1)
+                    thrust_state = thrust.sum(dim=1, keepdim=True)
+                    ang_vel_state = torch.zeros_like(ori_vel)
+                else:
+                    raise ValueError(
+                        f"Unexpected state dimension {state.shape[1]}; expected 17 or 22."
+                    )
         else:
             pos, ori, vel, ori_vel = self._generate_state(indices)
+            thrust_state = None
+            ang_vel_state = None
 
         self.dynamics.reset(
             pos=pos,
@@ -245,6 +267,8 @@ class DroneEnvsBase:
             ori_vel=ori_vel,
             motor_omega=motor_speed,
             thrusts=thrust,
+            thrust_state=thrust_state,
+            ang_vel_state=ang_vel_state,
             t=t,
             indices=indices,
         )

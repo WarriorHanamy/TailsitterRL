@@ -10,8 +10,8 @@ STATE_POS = slice(0, 3)
 STATE_ORI = slice(3, 7)
 STATE_VEL = slice(7, 10)
 STATE_ANG_VEL = slice(10, 13)
-STATE_MOTOR_SPEED = slice(13, 17)
-STATE_TIME = slice(17, 18)
+STATE_THRUST = slice(13, 14)
+STATE_ANG_VEL_DOT = slice(14, 17)
 
 
 @dataclass

@@ -1,13 +1,21 @@
+from __future__ import annotations
+
+from collections.abc import Iterable
+
 import torch
 
 from vtol_rl import config
 from vtol_rl.utils.maths import Integrator, Quaternion
-from vtol_rl.utils.type import ACTION_TYPE, PID, Uniform, action_type_alias, bound
+from vtol_rl.utils.type import ACTION_TYPE, Uniform, action_type_alias, bound
 
 
 class Dynamics:
-    g = torch.tensor([[0, 0, -9.81]])  # gravity vector
-    z = torch.tensor([[0, 0, 1]])  # upward vector
+    """
+    Closed-loop VTOL dynamics model with thrust and angular-rate actuators.
+    """
+
+    g = torch.tensor([[0.0, 0.0, -9.81]], dtype=torch.float32)
+    z = torch.tensor([[0.0, 0.0, 1.0]], dtype=torch.float32)
 
     def __init__(
         self,
@@ -20,146 +28,171 @@ class Dynamics:
         ctrl_delay: bool = True,
         comm_delay: float = 0.06,
         action_space: tuple[float, float] = (-1, 1),
-        device: torch.device = torch.device("cpu"),
+        device: torch.device | str = torch.device("cpu"),
         integrator: str = "euler",
-        drag_random: float = 0,
+        drag_random: float = 0.0,
         cfg: str = "drone_state",
     ):
-        assert action_type in ["bodyrate"]
-        assert ori_output_type in ["quaternion"]
+        if action_type not in ("bodyrate",):
+            raise ValueError("Only 'bodyrate' action type is supported.")
+        if ori_output_type not in ("quaternion",):
+            raise ValueError("Only quaternion orientation output is supported.")
 
-        self.device = device
-
-        # iterative variables
-        self.num: int = num
-        self._position: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
-        self._orientation: Quaternion = Quaternion(num=self.num, device=self.device)
-        self._velocity: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
-        self._angular_velocity: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
-        self._acc: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
-        self._acc_thrust: torch.Tensor = torch.Tensor(self.num, 1).to(self.device)
-        self._angular_acc: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
-        self._angular_jerk: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
-        self._t: torch.Tensor = torch.zeros((self.num,), device=self.device)
-        self._thrusts: torch.Tensor | None = None
-        self._motor_omega: torch.Tensor | None = None
+        self.num = int(num)
+        self.device = torch.device(device)
+        self.dtype = torch.float32
 
         self.action_type = action_type_alias[action_type]
-        self.sim_time_step = sim_time_step
-        self.ctrl_period = ctrl_period
+        self.ori_output_type = ori_output_type
 
+        self.sim_time_step = float(sim_time_step)
+        self.ctrl_period = float(ctrl_period)
         if self.ctrl_period < self.sim_time_step:
             raise ValueError(
-                "ctrl_period must be >= sim_time_step; it is recommended to be multiples of sim_time_step"
+                "ctrl_period must be >= sim_time_step; set ctrl_period as a multiple of sim_time_step."
             )
-        if (
-            not torch.as_tensor(self.ctrl_period) % torch.as_tensor(self.sim_time_step)
-            == 0
-        ):
-            raise ValueError("ctrl_period should be a multiple of sim_time_step")
+        ratio = torch.as_tensor(self.ctrl_period) / torch.as_tensor(self.sim_time_step)
+        if torch.any(ratio % 1 != 0):
+            raise ValueError("ctrl_period should be an integer multiple of sim_time_step.")
 
-        self._interval_steps = int(self.ctrl_period / self.sim_time_step)
+        self._interval_steps = int(round(self.ctrl_period / self.sim_time_step))
         self._comm_delay_steps = int(comm_delay / self.ctrl_period)
+        self._ctrl_delay = bool(ctrl_delay)
         self._integrator = "1st_order_euler" if integrator == "euler" else integrator
-        self._ctrl_delay = ctrl_delay
 
-        # initialization
         self.cfg = cfg
+        self._drag_random = float(drag_random)
+        self.action_space = action_space
+
         self.set_seed(seed)
-        self._init()
-        self._get_scale_factor()
-        self._set_device(device)
 
-        # Hover thrust per rotor should be scalar; previous implementation returned a
-        # length-3 tensor because gravity is stored as a 3-vector.
-        self._init_thrust_mag = (self.m * -Dynamics.g[0, 2]) / 4
-        self._init_motor_omega = self._compute_rotor_omega(self._init_thrust_mag)
-        self._drag_random = drag_random
-
-    def _init(self):
-        try:
-            self._load()
-        except FileNotFoundError as e:
-            print(f"Error loading config file for Dynamics: {e.filename}")
-            raise
-
-        # 2(CW) ... 3(CCW)
-        # 1(CCW) ... 0(CW)
-        motor_direction = torch.tensor(
-            [
-                [1, -1, -1, 1],
-                [-1, -1, 1, 1],
-                [0, 0, 0, 0.0],
-            ]
-        )
-        motor_direction = motor_direction / motor_direction.norm(dim=0)
-        t_BM_ = self._arm_length * motor_direction
-
-        self._inertia = torch.diag(self._inertia)
-
-        self._inertia_inv = torch.inverse(self._inertia)
-        self._B_allocation = torch.cat(
-            [
-                torch.ones(1, 4),
-                t_BM_[:2],
-                self._kappa * torch.tensor([1, -1, 1, -1]).unsqueeze(0),
-            ],
-            dim=0,
-        )
-        self._B_allocation_inv = torch.inverse(self._B_allocation)
+        self._load_parameters()
+        self._build_closed_loop_constants()
+        self._init_state_tensors()
 
         self._pre_action = [
-            torch.zeros((self.num, 4), device=self.device)
+            torch.zeros((self.num, 4), device=self.device, dtype=self.dtype)
             for _ in range(self._comm_delay_steps)
         ]
 
-        self._linear_drag_coeffs = self._linear_drag_coeffs_mean
-        self._quad_drag_coeffs = self._quad_drag_coeffs_mean
+        self._get_scale_factor()
 
-    def detach(self):
-        self._position = self._position.clone().detach()
-        self._orientation = self._orientation.clone().detach()
-        self._velocity = self._velocity.clone().detach()
-        self._angular_velocity = self._angular_velocity.clone().detach()
-        if self._motor_omega is not None:
-            self._motor_omega = self._motor_omega.clone().detach()
-        if self._thrusts is not None:
-            self._thrusts = self._thrusts.clone().detach()
-        self._angular_acc = self._angular_acc.clone().detach()
-        self._acc = self._acc.clone().detach()
-        self._t = self._t.clone().detach()
-        self._pre_action = [pre_act.clone().detach() for pre_act in self._pre_action]
+    # --------------------------------------------------------------------- #
+    # Initialization helpers
+    # --------------------------------------------------------------------- #
+    def _load_parameters(self) -> None:
+        data = config.load_json(f"drone/{self.cfg}.json")
 
-    def _set_device(self, device):
-        self._c = self._c.to(device)
-        self._rotor_speed_to_thrust_coefs = self._rotor_speed_to_thrust_coefs.to(device)
-        self._B_allocation = self._B_allocation.to(device)
-        self._B_allocation_inv = self._B_allocation_inv.to(device)
-        self.m = self.m.to(device)
-        self._inertia = self._inertia.to(device)
-        self._inertia_inv = self._inertia_inv.to(device)
-        self._quad_drag_coeffs_mean = self._quad_drag_coeffs_mean.to(device)
-        self._linear_drag_coeffs_mean = self._linear_drag_coeffs_mean.to(device)
-        self._orientation = self._orientation.to(device)
+        self.name = data["name"]
 
-        # Move drag coefficients if they exist
-        if hasattr(self, "_linear_drag_coeffs"):
-            self._linear_drag_coeffs = self._linear_drag_coeffs.to(device)
-        if hasattr(self, "_quad_drag_coeffs"):
-            self._quad_drag_coeffs = self._quad_drag_coeffs.to(device)
+        self.m = torch.tensor(data["mass"], dtype=self.dtype, device=self.device)
+        inertia_diag = torch.as_tensor(
+            data["inertia"], dtype=self.dtype, device=self.device
+        )
+        self._inertia = torch.diag(inertia_diag)
+        self._inertia_inv = torch.inverse(self._inertia)
 
-        # Move PID controllers to the correct device
-        self._BODYRATE_PID = self._BODYRATE_PID.to(device)
+        cross_sections = torch.as_tensor(
+            data["cross_sections"], dtype=self.dtype, device=self.device
+        ).view(1, -1)
+        quad_drag = torch.as_tensor(
+            data["quad_drag_coeffs"], dtype=self.dtype, device=self.device
+        ).view(1, -1)
+        self._quad_drag_coeffs_mean = 0.5 * 1.225 * cross_sections * quad_drag
+        self._linear_drag_coeffs_mean = torch.as_tensor(
+            data["linear_drag_coeffs"], dtype=self.dtype, device=self.device
+        ).view(1, -1)
 
-        Dynamics.z.to(device)
-        Dynamics.g.to(device)
+        self._rotor_speed_to_thrust_coefs = torch.as_tensor(
+            data["rotor_speed_to_thrust_coefs"], dtype=self.dtype, device=self.device
+        )
 
+        motor_max = torch.tensor(data["motor_omega_max"], dtype=self.dtype, device=self.device)
+        motor_min = torch.tensor(data["motor_omega_min"], dtype=self.dtype, device=self.device)
+        self._bd_rotor_omega = bound(min=motor_min.item(), max=motor_max.item())
+
+        thrust_max = (
+            self._rotor_speed_to_thrust_coefs[0] * motor_max.pow(2)
+            + self._rotor_speed_to_thrust_coefs[1] * motor_max
+            + self._rotor_speed_to_thrust_coefs[2]
+        )
+        thrust_min = torch.tensor(0.0, dtype=self.dtype, device=self.device)
+        self._bd_thrust = bound(min=thrust_min.item(), max=thrust_max.item())
+
+        max_rate = torch.tensor(data["max_rate"], dtype=self.dtype, device=self.device)
+        self._bd_rate = bound(min=(-max_rate).item(), max=max_rate.item())
+
+        max_spd = torch.tensor(data["max_spd"], dtype=self.dtype, device=self.device)
+        self._bd_spd = bound(min=(-max_spd).item(), max=max_spd.item())
+
+        max_pos = torch.tensor(data["max_pos"], dtype=self.dtype, device=self.device)
+        self._bd_pos = bound(min=(-max_pos).item(), max=max_pos.item())
+
+    def _build_closed_loop_constants(self) -> None:
+        self._gravity = Dynamics.g.to(device=self.device, dtype=self.dtype)
+        self._body_z = Dynamics.z.to(device=self.device, dtype=self.dtype)
+
+        self._hover_total_thrust = self.m * -self._gravity[0, 2]
+        self._hover_thrust_per_rotor = self._hover_total_thrust / 4
+        self._max_total_thrust = self._bd_thrust.max * 4
+        self._init_thrust_mag = self._hover_thrust_per_rotor.item()
+        hover_thrusts = torch.full(
+            (1, 4),
+            self._init_thrust_mag,
+            device=self.device,
+            dtype=self.dtype,
+        )
+        self._init_motor_omega = self._compute_rotor_omega(hover_thrusts)[0, 0].item()
+
+        self._thrust_time_constant = torch.tensor(0.05, device=self.device, dtype=self.dtype)
+
+        zeta_xy = torch.tensor([0.7, 0.7], device=self.device, dtype=self.dtype)
+        omega_n_xy = torch.tensor([100.0, 100.0], device=self.device, dtype=self.dtype)
+        zeta_z = torch.tensor([1.5], device=self.device, dtype=self.dtype)
+        omega_n_z = torch.tensor([8.0], device=self.device, dtype=self.dtype)
+        self._zeta = torch.cat([zeta_xy, zeta_z]).view(1, 3)
+        self._omega_n = torch.cat([omega_n_xy, omega_n_z]).view(1, 3)
+
+        self._acc_noise_std = torch.tensor(0.5, device=self.device, dtype=self.dtype)
+
+    def _init_state_tensors(self) -> None:
+        self._position = torch.zeros((self.num, 3), device=self.device, dtype=self.dtype)
+        self._orientation = Quaternion(num=self.num, device=self.device)
+        self._velocity = torch.zeros((self.num, 3), device=self.device, dtype=self.dtype)
+        self._angular_velocity = torch.zeros((self.num, 3), device=self.device, dtype=self.dtype)
+
+        self._thrust_state = torch.full(
+            (self.num, 1),
+            self._hover_total_thrust.item(),
+            device=self.device,
+            dtype=self.dtype,
+        )
+        self._angular_velocity_state = torch.zeros(
+            (self.num, 3), device=self.device, dtype=self.dtype
+        )
+
+        self._angular_acc = torch.zeros((self.num, 3), device=self.device, dtype=self.dtype)
+        self._angular_jerk = torch.zeros((self.num, 3), device=self.device, dtype=self.dtype)
+        self._acc = torch.zeros((self.num, 3), device=self.device, dtype=self.dtype)
+        self._t = torch.zeros((self.num,), device=self.device, dtype=self.dtype)
+
+        self._linear_drag_coeffs = self._linear_drag_coeffs_mean.repeat(self.num, 1)
+        self._quad_drag_coeffs = self._quad_drag_coeffs_mean.repeat(self.num, 1)
+
+        self._thrusts = self._thrust_state.repeat(1, 4) / 4
+        self._motor_omega = self._compute_rotor_omega(self._thrusts)
+
+    # --------------------------------------------------------------------- #
+    # Reset and state manipulation
+    # --------------------------------------------------------------------- #
     def _reset_batch_size(self, indices) -> int:
         if indices is None:
             return self.num
         if isinstance(indices, torch.Tensor):
             return int(indices.numel())
-        return len(indices)
+        if isinstance(indices, Iterable):
+            return len(list(indices))
+        raise TypeError("indices must be None, Tensor, or iterable of indices.")
 
     def _coerce_reset_tensor(
         self,
@@ -172,9 +205,12 @@ class Dynamics:
             return None
 
         if isinstance(value, torch.Tensor):
-            tensor = value.to(device=self.device, dtype=torch.float32)
+            tensor = value.to(device=self.device, dtype=self.dtype)
         else:
-            tensor = torch.as_tensor(value, dtype=torch.float32, device=self.device)
+            tensor = torch.as_tensor(value, dtype=self.dtype, device=self.device)
+
+        if tensor.ndim == 1 and expected_feature_dim == 1:
+            tensor = tensor.view(-1, 1)
 
         if tensor.ndim != 2:
             raise ValueError(
@@ -193,33 +229,30 @@ class Dynamics:
 
         return tensor.contiguous()
 
-    def _coerce_reset_times(
-        self,
-        value,
-        batch_size: int,
-    ) -> torch.Tensor | None:
+    def _coerce_reset_times(self, value, batch_size: int) -> torch.Tensor | None:
         if value is None:
             return None
 
         if isinstance(value, torch.Tensor):
-            tensor = value.to(device=self.device, dtype=torch.float32)
+            tensor = value.to(device=self.device, dtype=self.dtype)
         else:
-            tensor = torch.as_tensor(value, dtype=torch.float32, device=self.device)
+            tensor = torch.as_tensor(value, dtype=self.dtype, device=self.device)
 
-        if tensor.ndim == 2 and tensor.shape[-1] == 1:
-            tensor = tensor.squeeze(-1)
+        if tensor.ndim == 1:
+            if tensor.shape[0] != batch_size:
+                raise ValueError(
+                    f"t must have shape (batch,) or (batch, 1); received {tuple(tensor.shape)}"
+                )
+            return tensor
 
-        if tensor.ndim != 1:
-            raise ValueError(
-                f"t must have shape (batch,); received {tuple(tensor.shape)}"
-            )
+        if tensor.ndim == 2:
+            if tensor.shape[0] != batch_size or tensor.shape[1] != 1:
+                raise ValueError(
+                    f"t must have shape (batch,) or (batch, 1); received {tuple(tensor.shape)}"
+                )
+            return tensor.squeeze(1)
 
-        if tensor.shape[0] != batch_size:
-            raise ValueError(
-                f"t batch dimension must match number of indices ({batch_size}); received {tuple(tensor.shape)}"
-            )
-
-        return tensor.contiguous()
+        raise ValueError("t must be a 1D or 2D tensor")
 
     def reset(
         self,
@@ -229,23 +262,25 @@ class Dynamics:
         ori_vel: list | torch.Tensor | None = None,
         motor_omega: list | torch.Tensor | None = None,
         thrusts: list | torch.Tensor | None = None,
+        thrust_state: list | torch.Tensor | None = None,
+        ang_vel_state: list | torch.Tensor | None = None,
         t: list | torch.Tensor | None = None,
-        indices: list | None = None,
-    ):
+        indices: list | torch.Tensor | None = None,
+    ) -> torch.Tensor:
         batch_size = self._reset_batch_size(indices)
         pos_tensor = self._coerce_reset_tensor("pos", pos, 3, batch_size)
         vel_tensor = self._coerce_reset_tensor("vel", vel, 3, batch_size)
         ori_vel_tensor = self._coerce_reset_tensor("ori_vel", ori_vel, 3, batch_size)
-        motor_tensor = self._coerce_reset_tensor(
-            "motor_omega", motor_omega, 4, batch_size
-        )
-        thrust_tensor = self._coerce_reset_tensor("thrusts", thrusts, 4, batch_size)
         ori_tensor = self._coerce_reset_tensor("ori", ori, 4, batch_size)
+        thrusts_tensor = self._coerce_reset_tensor("thrusts", thrusts, 4, batch_size)
+        motor_tensor = self._coerce_reset_tensor("motor_omega", motor_omega, 4, batch_size)
+        thrust_state_tensor = self._coerce_reset_tensor("thrust_state", thrust_state, 1, batch_size)
+        ang_vel_state_tensor = self._coerce_reset_tensor("ang_vel_state", ang_vel_state, 3, batch_size)
         time_tensor = self._coerce_reset_times(t, batch_size)
 
         if indices is None:
             self._position = (
-                torch.zeros((self.num, 3), device=self.device)
+                torch.zeros((self.num, 3), device=self.device, dtype=self.dtype)
                 if pos_tensor is None
                 else pos_tensor
             )
@@ -260,131 +295,266 @@ class Dynamics:
                 )
             )
             self._velocity = (
-                torch.zeros((self.num, 3), device=self.device)
+                torch.zeros((self.num, 3), device=self.device, dtype=self.dtype)
                 if vel_tensor is None
                 else vel_tensor
             )
             self._angular_velocity = (
-                torch.zeros((self.num, 3), device=self.device)
+                torch.zeros((self.num, 3), device=self.device, dtype=self.dtype)
                 if ori_vel_tensor is None
                 else ori_vel_tensor
             )
-            self._thrusts = (
-                torch.ones((self.num, 4), device=self.device) * self._init_thrust_mag
-                if thrust_tensor is None
-                else thrust_tensor
+            self._thrust_state = (
+                torch.full(
+                    (self.num, 1),
+                    self._hover_total_thrust.item(),
+                    device=self.device,
+                    dtype=self.dtype,
+                )
+                if thrust_state_tensor is None
+                else thrust_state_tensor
             )
-            self._motor_omega = (
-                torch.ones((self.num, 4), device=self.device) * self._init_motor_omega
-                if motor_tensor is None
-                else motor_tensor
+            self._angular_velocity_state = (
+                torch.zeros((self.num, 3), device=self.device, dtype=self.dtype)
+                if ang_vel_state_tensor is None
+                else ang_vel_state_tensor
             )
             self._t = (
-                torch.zeros((self.num,), device=self.device)
+                torch.zeros((self.num,), device=self.device, dtype=self.dtype)
                 if time_tensor is None
                 else time_tensor
             )
-
-            self._angular_acc = torch.zeros((self.num, 3), device=self.device)
-            self._acc = torch.zeros((self.num, 3), device=self.device)
-            self._pre_action = [
-                torch.zeros((self.num, 4), device=self.device)
-                for _ in range(self._comm_delay_steps)
-            ]
-            if self._drag_random:
-                self._linear_drag_coeffs = self._linear_drag_coeffs_mean * (
-                    (
-                        (torch.rand_like(self._linear_drag_coeffs_mean) - 0.5)
-                        * 2
-                        * self._drag_random
-                    ).clamp(-0.5, 0.5)
-                    + 1
-                )
-                self._quad_drag_coeffs = self._quad_drag_coeffs_mean * (
-                    (
-                        (torch.rand_like(self._quad_drag_coeffs_mean) - 0.5)
-                        * 2
-                        * self._drag_random
-                    ).clamp(-0.5, 0.5)
-                    + 1
-                )
-
         else:
-            idx_count = batch_size
-            self._position[indices, :] = (
-                torch.zeros((idx_count, 3), device=self.device)
+            idx = (
+                indices
+                if isinstance(indices, slice)
+                else torch.as_tensor(indices, device=self.device, dtype=torch.long)
+            )
+            self._position[idx] = (
+                torch.zeros((batch_size, 3), device=self.device, dtype=self.dtype)
                 if pos_tensor is None
                 else pos_tensor
             )
-            self._orientation[indices] = (
-                Quaternion(num=idx_count, device=self.device)
-                if ori_tensor is None
-                else ori_tensor
-            )
-            self._velocity[indices, :] = (
-                torch.zeros((idx_count, 3), device=self.device)
+            if ori_tensor is None:
+                self._orientation[idx] = Quaternion(
+                    num=batch_size, device=self.device
+                )
+            else:
+                self._orientation[idx] = ori_tensor
+            self._velocity[idx] = (
+                torch.zeros((batch_size, 3), device=self.device, dtype=self.dtype)
                 if vel_tensor is None
                 else vel_tensor
             )
-            self._angular_velocity[indices, :] = (
-                torch.zeros((idx_count, 3), device=self.device)
+            self._angular_velocity[idx] = (
+                torch.zeros((batch_size, 3), device=self.device, dtype=self.dtype)
                 if ori_vel_tensor is None
                 else ori_vel_tensor
             )
-            self._motor_omega[indices, :] = (
-                torch.ones((idx_count, 4), device=self.device) * self._init_motor_omega
-                if motor_tensor is None
-                else motor_tensor
-            )
-            self._thrusts[indices, :] = (
-                torch.ones((idx_count, 4), device=self.device) * self._init_thrust_mag
-                if thrust_tensor is None
-                else thrust_tensor
-            )
-            self._t[indices] = (
-                torch.zeros((idx_count,), device=self.device)
-                if time_tensor is None
-                else time_tensor
-            )
-            self._t[indices] = (
-                torch.zeros((idx_count,), device=self.device)
-                + torch.rand((idx_count,)) * 3.14 * 2
-                if time_tensor is None
-                else time_tensor
-            )
-
-            self._angular_acc[indices, :] = torch.zeros(
-                (idx_count, 3), device=self.device
-            )
-            self._acc[indices, :] = torch.zeros((idx_count, 3), device=self.device)
-            for i in range(self._comm_delay_steps):
-                self._pre_action[i][indices] = 0
-
-            # REC MARK: disable now.
-            self._drag_random = False
-            if self._drag_random:
-                self._linear_drag_coeffs[indices, :] = self._linear_drag_coeffs_mean * (
-                    (
-                        (
-                            torch.rand_like(self._linear_drag_coeffs_mean[indices, :])
-                            - 0.5
-                        )
-                        * 2
-                        * self._drag_random
-                    ).clamp(-0.5, 0.5)
-                    + 1
+            self._thrust_state[idx] = (
+                torch.full(
+                    (batch_size, 1),
+                    self._hover_total_thrust.item(),
+                    device=self.device,
+                    dtype=self.dtype,
                 )
-                self._quad_drag_coeffs[:, indices] = self._quad_drag_coeffs_mean * (
-                    (
-                        (torch.rand_like(self._quad_drag_coeffs_mean[:, indices]) - 0.5)
-                        * 2
-                        * self._drag_random
-                    ).clamp(-0.5, 0.5)
-                    + 1
+                if thrust_state_tensor is None
+                else thrust_state_tensor
+            )
+            self._angular_velocity_state[idx] = (
+                torch.zeros((batch_size, 3), device=self.device, dtype=self.dtype)
+                if ang_vel_state_tensor is None
+                else ang_vel_state_tensor
+            )
+            if time_tensor is None:
+                self._t[idx] = torch.zeros(
+                    (batch_size,), device=self.device, dtype=self.dtype
                 )
+            else:
+                self._t[idx] = time_tensor
+
+        self._angular_acc.zero_()
+        self._angular_jerk.zero_()
+        self._acc.zero_()
+
+        self._thrusts = (
+            self._thrust_state.repeat(1, 4) / 4
+            if thrusts_tensor is None
+            else thrusts_tensor
+        )
+        self._motor_omega = (
+            self._compute_rotor_omega(self._thrusts)
+            if motor_tensor is None
+            else motor_tensor
+        )
+
+        self._linear_drag_coeffs = self._linear_drag_coeffs_mean.repeat(self.num, 1)
+        self._quad_drag_coeffs = self._quad_drag_coeffs_mean.repeat(self.num, 1)
+        self._apply_drag_randomization(indices)
+
+        self._pre_action = [
+            torch.zeros((self.num, 4), device=self.device, dtype=self.dtype)
+            for _ in range(self._comm_delay_steps)
+        ]
 
         return self.state
 
+    def _apply_drag_randomization(self, indices) -> None:
+        if self._drag_random <= 0:
+            return
+
+        def _rand_like(tensor: torch.Tensor) -> torch.Tensor:
+            return (
+                (torch.rand_like(tensor) - 0.5) * 2 * self._drag_random
+            ).clamp(-0.5, 0.5) + 1.0
+
+        if indices is None:
+            self._linear_drag_coeffs = self._linear_drag_coeffs_mean.repeat(self.num, 1) * _rand_like(
+                self._linear_drag_coeffs_mean.repeat(self.num, 1)
+            )
+            self._quad_drag_coeffs = self._quad_drag_coeffs_mean.repeat(self.num, 1) * _rand_like(
+                self._quad_drag_coeffs_mean.repeat(self.num, 1)
+            )
+        else:
+            idx = (
+                indices
+                if isinstance(indices, slice)
+                else torch.as_tensor(indices, device=self.device, dtype=torch.long)
+            )
+            self._linear_drag_coeffs[idx] = (
+                self._linear_drag_coeffs_mean.repeat(self.num, 1)[idx] * _rand_like(self._linear_drag_coeffs_mean.repeat(self.num, 1)[idx])
+            )
+            self._quad_drag_coeffs[idx] = (
+                self._quad_drag_coeffs_mean.repeat(self.num, 1)[idx] * _rand_like(self._quad_drag_coeffs_mean.repeat(self.num, 1)[idx])
+            )
+
+    def detach(self) -> None:
+        self._position = self._position.clone().detach()
+        self._orientation = self._orientation.clone().detach()
+        self._velocity = self._velocity.clone().detach()
+        self._angular_velocity = self._angular_velocity.clone().detach()
+        self._angular_velocity_state = self._angular_velocity_state.clone().detach()
+        self._angular_acc = self._angular_acc.clone().detach()
+        self._angular_jerk = self._angular_jerk.clone().detach()
+        self._thrust_state = self._thrust_state.clone().detach()
+        self._acc = self._acc.clone().detach()
+        self._t = self._t.clone().detach()
+        self._thrusts = self._thrusts.clone().detach()
+        self._motor_omega = self._motor_omega.clone().detach()
+        self._pre_action = [pre.clone().detach() for pre in self._pre_action]
+
+    # --------------------------------------------------------------------- #
+    # Simulation step
+    # --------------------------------------------------------------------- #
+    def step(self, action: torch.Tensor) -> torch.Tensor:
+        if action.ndim != 2 or action.shape[1] != 4:
+            raise ValueError("action must have shape (num_envs, 4)")
+        if action.shape[0] != self.num:
+            raise ValueError(f"Expected {self.num} actions, got {action.shape[0]}")
+
+        if self._comm_delay_steps:
+            self._pre_action.append(action.clone())
+            action = self._pre_action.pop(0)
+
+        command = self._de_normalize(action)
+        target_thrust = (command[:, :1] * self.m).clamp(min=0.0, max=self._max_total_thrust)
+        target_bodyrate = command[:, 1:]
+
+        for _ in range(self._interval_steps):
+            self._update_thrust_state(target_thrust, self.sim_time_step)
+            self._update_angular_state(target_bodyrate, self.sim_time_step)
+            self._update_linear_dynamics(self.sim_time_step)
+
+        self._t += self.ctrl_period
+        self._ugly_fix()
+        return self.state
+
+    def _update_thrust_state(self, target_thrust: torch.Tensor, dt: float) -> None:
+        thrust_error = target_thrust - self._thrust_state
+        thrust_derivative = thrust_error / self._thrust_time_constant
+        self._thrust_state = (self._thrust_state + thrust_derivative * dt).clamp(
+            min=0.0, max=self._max_total_thrust
+        )
+        self._thrusts = self._thrust_state.repeat(1, 4) / 4
+        self._motor_omega = self._compute_rotor_omega(self._thrusts)
+
+    def _update_angular_state(self, target_bodyrate: torch.Tensor, dt: float) -> None:
+        omega_error = target_bodyrate - self._angular_velocity
+        omega_n_sq = self._omega_n.pow(2)
+        damping = 2 * self._zeta * self._omega_n * self._angular_velocity_state
+        angular_jerk = omega_n_sq * omega_error - damping
+
+        self._angular_velocity_state = self._angular_velocity_state + angular_jerk * dt
+        self._angular_velocity = self._angular_velocity + self._angular_velocity_state * dt
+
+        self._angular_jerk = angular_jerk
+        self._angular_acc = self._angular_velocity_state
+
+        self._angular_velocity = self._angular_velocity.clamp(
+            min=self._bd_rate.min, max=self._bd_rate.max
+        )
+
+    def _update_linear_dynamics(self, dt: float) -> None:
+        thrust_body = self._body_z * self._thrust_state
+        velocity_body = self._orientation.inv_rotate(self._velocity)
+
+        linear_drag = self._linear_drag_coeffs * velocity_body
+        quadratic_drag = self._quad_drag_coeffs * velocity_body * velocity_body.abs()
+        drag_body = linear_drag + quadratic_drag
+
+        proper_force_body = thrust_body - drag_body
+        acc_body = proper_force_body / self.m
+        acc_world = self._orientation.rotate(acc_body) + self._gravity
+        acc_world = acc_world + torch.randn_like(acc_world) * self._acc_noise_std
+        self._acc = acc_world
+
+        omega = self._angular_velocity
+        inertia = self._inertia
+        coriolis = torch.linalg.cross(omega, omega @ inertia.T, dim=1)
+        body_torque = self._angular_acc @ inertia.T + coriolis
+
+        def derivatives_fn(*, pos, ori, vel, ori_vel):
+            return self.get_derivatives(
+                pos=pos,
+                ori=ori,
+                vel=vel,
+                ori_vel=ori_vel,
+                acc=acc_world,
+                tau=body_torque,
+            )
+
+        (
+            self._position,
+            self._orientation,
+            self._velocity,
+            self._angular_velocity,
+            _,
+        ) = Integrator.integrate(
+            pos=self._position,
+            ori=self._orientation,
+            vel=self._velocity,
+            ori_vel=self._angular_velocity,
+            dt=dt,
+            type=self._integrator,
+            get_derivatives=derivatives_fn,
+        )
+
+    def _ugly_fix(self) -> None:
+        self._position[:, :2] = self._position[:, :2].clamp(
+            min=self._bd_pos.min, max=self._bd_pos.max
+        )
+        self._position[:, 2] = self._position[:, 2].clamp(min=0.0, max=self._bd_pos.max)
+        self._velocity = self._velocity.clamp(
+            min=self._bd_spd.min, max=self._bd_spd.max
+        )
+        self._angular_velocity = self._angular_velocity.clamp(
+            min=self._bd_rate.min, max=self._bd_rate.max
+        )
+        self._thrust_state = self._thrust_state.clamp(min=0.0, max=self._max_total_thrust)
+
+    # --------------------------------------------------------------------- #
+    # Utility functions
+    # --------------------------------------------------------------------- #
     def get_derivatives(
         self,
         pos: torch.Tensor,
@@ -395,476 +565,142 @@ class Dynamics:
         acc: torch.Tensor,
         tau: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Compute state derivatives for the current dynamics model.
-
-        Args:
-            pos: position in world frame, shape (N, 3)
-            ori: orientation quaternion, Quaternion
-            vel: linear velocity in world frame, shape (N, 3)
-            ori_vel: angular velocity in body frame, shape (N, 3)
-            acc: linear acceleration in world frame, shape (N, 3)
-            tau: body-frame torque, shape (N, 3)
-        """
         d_pos = vel
-        omega = ori_vel
-        zeros = torch.zeros(omega.shape[0], device=omega.device, dtype=omega.dtype)
-        omega_quat = Quaternion(zeros, omega[:, 0], omega[:, 1], omega[:, 2])
+        zeros = torch.zeros(ori_vel.shape[0], device=self.device, dtype=self.dtype)
+        omega_quat = Quaternion(zeros, ori_vel[:, 0], ori_vel[:, 1], ori_vel[:, 2])
         d_ori = (ori * omega_quat * 0.5).toTensor()
         d_vel = acc
-        J_omega = omega @ self._inertia.T
-        coriolis = torch.linalg.cross(omega, J_omega, dim=1)
+        J_omega = ori_vel @ self._inertia.T
+        coriolis = torch.linalg.cross(ori_vel, J_omega, dim=1)
         d_ori_vel = (tau - coriolis) @ self._inertia_inv.T
         return d_pos, d_ori, d_vel, d_ori_vel
 
-    def step(self, action: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Step the simulation forward by one control period given the action.
-        Args:
-            action (torch.Tensor): shape (N, 4), in range [-1, 1]
-        Returns:
-            state (torch.Tensor): shape (N, 13): (p,q,v,r)
-        """
+    def _compute_rotor_omega(self, thrusts: torch.Tensor) -> torch.Tensor:
+        thrusts = thrusts.clamp(min=0.0, max=self._bd_thrust.max)
+        a, b, c = self._rotor_speed_to_thrust_coefs
+        discriminant = torch.clamp(b * b - 4 * a * (c - thrusts), min=0.0)
+        omega = (-b + torch.sqrt(discriminant)) / (2 * a)
+        return omega.clamp(min=self._bd_rotor_omega.min, max=self._bd_rotor_omega.max)
 
-        if self._comm_delay_steps:
-            self._pre_action.append(action.clone())
-            action = self._pre_action.pop(0)
+    def set_seed(self, seed: int | None = 42) -> None:
+        if seed is None:
+            return
+        torch.manual_seed(int(seed))
 
-        command = self._de_normalize(action)  # command is actual [T, bodyrate_x,y,z]
+    def close(self) -> None:
+        return
 
-        thrust_des = self._get_thrust_from_cmd(command)  #
-
-        for _ in range(self._interval_steps):
-            # thrust_des = self._get_thrust_from_cmd(command)
-            # assert (thrust_des <= self._bd_thrust.max).all()
-            self._run_motors(thrust_des)
-            # force_torque = self._B_allocation @ self._thrusts  # 计算力矩
-            force_torque = self._thrusts @ self._B_allocation.T
-
-            # compute linear acceleration and body torque
-            velocity_body = self._orientation.inv_rotate(self._velocity)
-            linear_drag_coeffs = self._linear_drag_coeffs.reshape(-1, 3)
-            quadratic_drag_coeffs = self._quad_drag_coeffs.reshape(-1, 3)
-            linear_drag = linear_drag_coeffs * velocity_body
-            quadratic_drag = quadratic_drag_coeffs * velocity_body * velocity_body.abs()
-            drag = linear_drag + quadratic_drag
-            # drag = self._drag_coeffs * (self._orientation.inv_rotate(self._velocity - 0).pow(2))
-            thrust_body = Dynamics.z * force_torque[:, 0].unsqueeze(1)
-            proper_force_body = thrust_body - drag
-            gravity = Dynamics.g
-            self._acc = self._orientation.rotate(proper_force_body) / self.m + gravity
-
-            acc_noise = torch.randn_like(self._acc) * 0.5
-
-            torque = force_torque[:, 1:]
-
-            # integrate the state
-            acc_total = self._acc + acc_noise
-            torque_total = torque
-
-            def derivatives_fn(*, pos, ori, vel, ori_vel):
-                return self.get_derivatives(
-                    pos=pos,
-                    ori=ori,
-                    vel=vel,
-                    ori_vel=ori_vel,
-                    acc=acc_total,
-                    tau=torque_total,
-                )
-
-            (
-                self._position,
-                self._orientation,
-                self._velocity,
-                self._angular_velocity,
-                self._angular_acc,
-            ) = Integrator.integrate(
-                pos=self._position,
-                ori=self._orientation,
-                vel=self._velocity,
-                ori_vel=self._angular_velocity,
-                dt=self.sim_time_step,
-                type=self._integrator,
-                get_derivatives=derivatives_fn,
-            )
-
-        self._t += self.ctrl_period
-
-        self._ugly_fix()  # Re-enabled to prevent position explosion
-        print(f"self.state: {self.state}")
-        return self.state
-
-    def _ugly_fix(self):
-        # Clamp to reasonable values for FSC compatibility
-        # X, Y: [-100, 100] meters (large enough for any reasonable scenario)
-        # Z: [0, 10] meters (ground to reasonable altitude)
-        self._position[0:2] = self._position[0:2].clamp(-100, 100)  # X, Y
-        self._position[2] = self._position[2].clamp(0, 10)  # Z (altitude)
-        self._velocity = self._velocity.clamp(-10, 10)
-        self._angular_velocity = self._angular_velocity.clamp(-10, 10)
-
-    def _get_thrust_from_cmd(self, command) -> torch.Tensor:
-        """
-        Args:
-            command: shape (N, 4)
-        Returns:
-            thrusts_des: shape (N, 4)
-        """
-
-        if self.action_type == ACTION_TYPE.BODYRATE:
-            angular_velocity_error = command[:, 1:] - self._angular_velocity
-
-            pid_p = self._BODYRATE_PID.p
-            p_term = angular_velocity_error @ pid_p.T
-
-            pid_d = self._BODYRATE_PID.d
-            d_term = -(self._angular_acc @ pid_d.T)
-
-            p_term_reshaped = p_term.unsqueeze(2)  # Shape becomes (N, 3, 1)
-            inertia_reshaped = self._inertia.unsqueeze(0)  # Shape becomes (1, 3, 3)
-
-            # The result of this matmul will be (N, 3, 1), we then squeeze it back to (N, 3)
-            body_torque_des = (
-                torch.matmul(inertia_reshaped, p_term_reshaped).squeeze(2) - d_term
-            )
-
-            gross_thrust_and_torques = torch.cat(
-                [command[:, 0].unsqueeze(1), body_torque_des], dim=1
-            )
-
-            thrusts_des = gross_thrust_and_torques @ self._B_allocation_inv.T
-        else:
-            raise ValueError("action_type should be one of ['bodyrate']")
-
-        clamp_thrusts_des = torch.clamp(
-            thrusts_des, self._bd_thrust.min, self._bd_thrust.max
-        )
-
-        return clamp_thrusts_des
-
-    def _run_motors(self, thrusts_des) -> torch.Tensor:
-        """_summary_
-        Returns:
-            _type_: _description_
-        """
-        if self._ctrl_delay:
-            motor_omega_des = self._compute_rotor_omega(thrusts_des)
-
-            # simulate motors as a first-order system
-            self._motor_omega = (
-                self._c * self._motor_omega + (1 - self._c) * motor_omega_des
-            )
-
-            self._thrusts = self._compute_thrust(self._motor_omega)
-        else:
-            self._thrusts = thrusts_des
-
-        return self._thrusts
-
-    def _compute_thrust(self, _motor_omega) -> torch.Tensor:
-        """_summary_
-            compute the thrust from the motor omega
-        Args:
-            _motor_omega (_type_): _description_
-        Returns:
-            _type_: _description_
-        """
-        _thrusts = (
-            (self._rotor_speed_to_thrust_coefs[0] * (_motor_omega).pow(2))
-            + self._rotor_speed_to_thrust_coefs[1] * _motor_omega
-            + self._rotor_speed_to_thrust_coefs[2]
-        )
-        return _thrusts
-
-    def _compute_rotor_omega(self, _thrusts) -> torch.Tensor:
-        """
-        Compute rotor angular speed omega from desired thrust(s) by inverting:
-            T(omega) = a*omega^2 + b*omega + c
-        This is a element-wise operation. Uses the positive root of the quadratic formula.
-
-        Args:
-            thrusts: Tensor of desired thrust [N], shape (N,4).
-
-        Returns:
-            omega: Tensor of angular speed [rad/s], shape (N,4), clamped to >= 0.
-        """
-        scale = 1 / (2 * self._rotor_speed_to_thrust_coefs[0])  # 1/(2a)
-        # yi yuan er ci han shu
-        omega = scale * (
-            -self._rotor_speed_to_thrust_coefs[1]
-            + torch.sqrt(
-                self._rotor_speed_to_thrust_coefs[1].pow(2)
-                - 4
-                * self._rotor_speed_to_thrust_coefs[0]
-                * (self._rotor_speed_to_thrust_coefs[2] - _thrusts)
-            )
-        )  # positive soluitno of quadratic formula
-        return omega
-
-    # def get_derivatives(self, command: torch.Tensor) -> tuple[torch.Tensor]:
-    #     """
-    #     Compute the state derivatives given the current state and action.
-    #     Args:
-    #         command (torch.Tensor): shape (N, 4), in range [almost g+std(.5g), bodyrate~Uniform(-_bd_rate, _bd_rate)]
-    #     Returns:
-    #         state_dot (torch.Tensor): shape (N, 13)
-    #         in the following order:
-    #             pos_dot (torch.Tensor): shape (N, 3)
-    #             ori_dot (torch.Tensor): shape (N, 4)
-    #             vel_dot (torch.Tensor): shape (N, 3)
-    #             ang_vel_dot (torch.Tensor): shape (N, 3)
-    #     """
-    #     pos_dot = self._velocity
-    #     zeros = torch.zeros((self.num,), device=self.device)
-    #     omega_quat = Quaternion(
-    #         zeros,
-    #         self._angular_velocity[:, 0],
-    #         self._angular_velocity[:, 1],
-    #         self._angular_velocity[:, 2],
-    #     ).toTensor()
-    #     ori_dot = (0.5 * self._orientation * omega_quat).toTensor()
-    #     acc_T_cmd = command[:, :1]  # thrust/m
-    #     bodyrate_cmd = command[:, 1:]  # bodyrate_x,y,z
-
-    #     vel_dot = self._acc + torch.randn_like(self._acc) * 0.5
-
-    def set_seed(self, seed=42):
-        torch.manual_seed(seed)
-
-    def close(self):
-        pass
-
-    def _load(self):
-        data = config.load_json(f"drone/{self.cfg}.json")
-        self.m = torch.tensor(data["mass"])
-        self._cross_sections = torch.tensor([data["cross_sections"]]).T  # 机体横截面积
-        self._quad_drag_coeffs_mean = (
-            torch.tensor([data["quad_drag_coeffs"]]).T
-            * 0.5
-            * 1.225
-            * self._cross_sections
-        )
-        self._linear_drag_coeffs_mean = torch.tensor([data["linear_drag_coeffs"]]).T
-        self._inertia = torch.tensor(data["inertia"])
-        self.name = data["name"]
-        self._BODYRATE_PID = PID(
-            p=torch.tensor(data["BODYRAYE_PID"]["p"]),
-            i=torch.tensor(data["BODYRAYE_PID"]["i"]),
-            d=torch.tensor(data["BODYRAYE_PID"]["d"]),
-        )
-
-        self._kappa = torch.tensor(data["kappa"])
-        self._arm_length = torch.tensor(data["arm_length"])
-        self._rotor_speed_to_thrust_coefs = torch.tensor(
-            data["rotor_speed_to_thrust_coefs"]
-        )
-        self._motor_tau_inv = torch.tensor(1 / data["motor_tau"])
-        self._c = torch.exp(-self._motor_tau_inv * self.sim_time_step)
-        self._bd_rotor_omega = bound(
-            max=data["motor_omega_max"],
-            min=data["motor_omega_min"],
-        )
-        self._bd_thrust = bound(
-            max=self._rotor_speed_to_thrust_coefs[0] * self._bd_rotor_omega.max**2
-            + self._rotor_speed_to_thrust_coefs[1] * self._bd_rotor_omega.max
-            + self._rotor_speed_to_thrust_coefs[2],
-            min=0,
-        )
-        self._bd_rate = bound(
-            max=torch.tensor(data["max_rate"]), min=torch.tensor(-data["max_rate"])
-        )
-        self._bd_yaw_rate = bound(
-            max=torch.tensor(data["max_rate"]), min=torch.tensor(-data["max_rate"])
-        )
-        self._bd_spd = bound(
-            max=torch.tensor(data["max_spd"]), min=torch.tensor(-data["max_spd"])
-        )
-        self._bd_pos = bound(
-            max=torch.tensor(data["max_pos"]), min=torch.tensor(-data["max_pos"])
-        )
-
-    def _get_scale_factor(self):
-        """_summary_
-            get the transformation parameters for the command
-        Args:
-            normal_range (-1, 1).
-        """
-        thrust_normalize_method = "medium"  # "max_min"
-        g_val = -Dynamics.g.view(-1)[2]
-        if self.action_type == ACTION_TYPE.BODYRATE:
-            if thrust_normalize_method == "medium":
-                thrust_normalizer = Uniform(
-                    mean=g_val,
-                    radius=0.9 * g_val,  # hover thrust is half of weight
-                ).to(self.device)
-            elif thrust_normalize_method == "max_min":
-                thrust_normalizer = Uniform.from_min_max(
-                    self._bd_thrust.min / self.m, self._bd_thrust.max / self.m
-                ).to(self.device)
-            else:
-                raise ValueError(
-                    "thrust_normalize_method should be one of ['medium', 'max_min']"
-                )
-            self._normals = {
-                "acc_thrust": thrust_normalizer,
-                "bodyrate": Uniform.from_min_max(
-                    self._bd_rate.min, self._bd_rate.max
-                ).to(self.device),
-            }
-
-        else:
-            raise ValueError(
-                "action_type should be one of ['thrust', 'bodyrate', 'velocity']"
-            )
+    def _get_scale_factor(self) -> None:
+        thrust_normalizer = Uniform(
+            mean=-self._gravity[:, 2], radius=0.9 * -self._gravity[:, 2]
+        ).to(self.device)
+        bodyrate_normalizer = Uniform.from_min_max(
+            self._bd_rate.min, self._bd_rate.max
+        ).to(self.device)
+        self._normals = {
+            "acc_thrust": thrust_normalizer,
+            "bodyrate": bodyrate_normalizer,
+        }
 
     def _de_normalize(self, action: torch.Tensor) -> torch.Tensor:
-        """
-            de-normalize the command to the real value
-        Args:
-            command torch.Tensor: shape (N, 4)
-                1. with normed values in range [-1, 1]
-                2. with the semantic order of [thrust/m, bodyrate_x, bodyrate_y, bodyrate_z]
-        Returns:
-            command torch.Tensor: shape (N, 4)
-                with real values
-        """
-        # REC MARK: we choose this order [T, bx, by, bz]
-        # REC MARK: Assume commands are in shape (N, 4)
-        if self.action_type == ACTION_TYPE.BODYRATE:
-            command = torch.cat(
-                [
-                    self._normals["acc_thrust"].per_sample_denormalize(action[:, :1]),
-                    self._normals["bodyrate"].per_sample_denormalize(action[:, 1:]),
-                ],
-                dim=1,
-            )
-        else:
-            raise ValueError("action_type should be one of ['bodyrate']")
-        return command
+        if self.action_type != ACTION_TYPE.BODYRATE:
+            raise ValueError("Only bodyrate control is implemented.")
 
+        return torch.cat(
+            [
+                self._normals["acc_thrust"].per_sample_denormalize(action[:, :1]),
+                self._normals["bodyrate"].per_sample_denormalize(action[:, 1:]),
+            ],
+            dim=1,
+        )
+
+    # --------------------------------------------------------------------- #
+    # Properties
+    # --------------------------------------------------------------------- #
     @property
-    def position(self):
-        """
-        Returns:
-            pos: shape (N, 3)
-        """
+    def position(self) -> torch.Tensor:
         return self._position
 
     @property
-    def orientation(self):
-        """
-        Returns:
-            ori: shape (N, 4)
-        """
+    def orientation(self) -> torch.Tensor:
         return self._orientation.toTensor()
 
     @property
-    def direction(self):
-        """
-        Returns:
-            dir: shape (N, 3), x-axis of the body frame in world frame or called forward-axis
-        """
+    def quaternion(self) -> Quaternion:
+        return self._orientation
+
+    @property
+    def direction(self) -> torch.Tensor:
         return self._orientation.x_axis
 
     @property
-    def velocity(self):
-        """
-        Returns:
-            vel: shape (N, 3)
-        """
+    def velocity(self) -> torch.Tensor:
         return self._velocity
 
     @property
-    def angular_velocity(self):
-        """
-        Returns:
-            angular_velocity: shape (N, 3)
-        """
+    def angular_velocity(self) -> torch.Tensor:
         return self._angular_velocity
 
     @property
-    def acceleration(self):
-        """
-        Returns:
-            acc: shape (N, 3)
-        """
+    def acceleration(self) -> torch.Tensor:
         return self._acc
 
     @property
-    def angular_acceleration(self):
-        """
-        Returns:
-            angular_acc: shape (N, 3)
-        """
+    def angular_acceleration(self) -> torch.Tensor:
         return self._angular_acc
 
     @property
-    def t(self):
-        """
-        Returns:
-            t: shape (N,)
-        """
+    def angular_jerk(self) -> torch.Tensor:
+        return self._angular_jerk
+
+    @property
+    def t(self) -> torch.Tensor:
         return self._t
 
     @property
-    def motor_omega(self):
-        if self._motor_omega is None:
-            return torch.zeros(
-                (self.num, 4), device=self.device, dtype=self._position.dtype
-            )
+    def motor_omega(self) -> torch.Tensor:
         return self._motor_omega
 
     @property
-    def thrusts(self):
-        """
-        Returns:
-            thrusts: shape (N, 4)
-        """
-        if self._thrusts is None:
-            return torch.zeros(
-                (self.num, 4), device=self.device, dtype=self._position.dtype
-            )
+    def thrusts(self) -> torch.Tensor:
         return self._thrusts
 
     @property
-    def state(self):
-        """
-        Returns:
-            state: shape (N, 13) (p, q, v, r)
-        """
+    def thrust_state(self) -> torch.Tensor:
+        return self._thrust_state
+
+    @property
+    def angular_velocity_state(self) -> torch.Tensor:
+        return self._angular_velocity_state
+
+    @property
+    def state(self) -> torch.Tensor:
         return torch.cat(
             [self.position, self.orientation, self.velocity, self.angular_velocity],
             dim=1,
         )
 
     @property
-    def full_state(self):
+    def full_state(self) -> torch.Tensor:
         return torch.cat(
             [
                 self.position,
                 self.orientation,
                 self.velocity,
                 self.angular_velocity,
-                self.motor_omega,
-                self.thrusts,
-                self.t.unsqueeze(1),
+                self.thrust_state,
+                self.angular_velocity_state,
             ],
             dim=1,
         )
 
     @property
-    def R(self):
+    def R(self) -> torch.Tensor:
         return self._orientation.R
 
     @property
-    def xz_axis(self):
+    def xz_axis(self) -> torch.Tensor:
         return self._orientation.xz_axis
 
 
-if __name__ == "__main__":
-    env = Dynamics()
-    env.reset()
-    for _ in range(100):
-        action = torch.tensor([[1.0, 1.0, 1.0, 1.0]])
-        state = env.step(action)
-        print(state)
+__all__ = ["Dynamics"]
