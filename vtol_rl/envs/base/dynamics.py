@@ -33,9 +33,7 @@ class Dynamics:
         # iterative variables
         self.num: int = num
         self._position: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
-        self._orientation: Quaternion = Quaternion(
-            num=self.num, device=self.device
-        ).toTensor()
+        self._orientation: Quaternion = Quaternion(num=self.num, device=self.device)
         self._velocity: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
         self._angular_velocity: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
         self._acc: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
@@ -43,6 +41,8 @@ class Dynamics:
         self._angular_acc: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
         self._angular_jerk: torch.Tensor = torch.Tensor(self.num, 3).to(self.device)
         self._t: torch.Tensor = torch.zeros((self.num,), device=self.device)
+        self._thrusts: torch.Tensor | None = None
+        self._motor_omega: torch.Tensor | None = None
 
         self.action_type = action_type_alias[action_type]
         self.sim_time_step = sim_time_step
@@ -121,8 +121,10 @@ class Dynamics:
         self._orientation = self._orientation.clone().detach()
         self._velocity = self._velocity.clone().detach()
         self._angular_velocity = self._angular_velocity.clone().detach()
-        self._motor_omega = self._motor_omega.clone().detach()
-        self._thrusts = self._thrusts.clone().detach()
+        if self._motor_omega is not None:
+            self._motor_omega = self._motor_omega.clone().detach()
+        if self._thrusts is not None:
+            self._thrusts = self._thrusts.clone().detach()
         self._angular_acc = self._angular_acc.clone().detach()
         self._acc = self._acc.clone().detach()
         self._t = self._t.clone().detach()
@@ -138,6 +140,7 @@ class Dynamics:
         self._inertia_inv = self._inertia_inv.to(device)
         self._quad_drag_coeffs_mean = self._quad_drag_coeffs_mean.to(device)
         self._linear_drag_coeffs_mean = self._linear_drag_coeffs_mean.to(device)
+        self._orientation = self._orientation.to(device)
 
         # Move drag coefficients if they exist
         if hasattr(self, "_linear_drag_coeffs"):
@@ -795,7 +798,6 @@ class Dynamics:
         """
         return self._angular_acc
 
-    @property
     @property
     def t(self):
         """
