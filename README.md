@@ -12,6 +12,22 @@
 2. commands are denormalized from actions, serving for the physical purpose.
 
 
+# Prerequisites
+
+Install Rust and uv using curl:
+
+```shell
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install just using cargo (Rust package manager)
+cargo install just
+```
+
 # Installation
 ```shell
 mamba env create -f environment.yml
