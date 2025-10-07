@@ -1,8 +1,13 @@
-import numpy as np
-from envs.multiDroneGymEnv import MultiDroneGymEnvBase
-from typing import Optional, Dict
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 import torch as th
 from gymnasium import spaces
+import numpy as np
+
+from envs.multiDroneGymEnv import MultiDroneGymEnvBase
 
 
 class MultiNavigationEnv(MultiDroneGymEnvBase):
@@ -13,14 +18,19 @@ class MultiNavigationEnv(MultiDroneGymEnvBase):
         seed: int = 42,
         visual: bool = False,
         requires_grad: bool = False,
-        random_kwargs: dict = {},
-        dynamics_kwargs: dict = {},
-        scene_kwargs: dict = {},
-        sensor_kwargs: list = [],
+        random_kwargs: Mapping[str, Any] | None = None,
+        dynamics_kwargs: Mapping[str, Any] | None = None,
+        scene_kwargs: Mapping[str, Any] | None = None,
+        sensor_kwargs: Sequence[Mapping[str, Any]] | None = None,
         device: str = "cpu",
-        target: Optional[th.Tensor] = None,
+        target: th.Tensor | None = None,
         max_episode_steps: int = 256,
     ):
+        random_kwargs = {} if random_kwargs is None else dict(random_kwargs)
+        dynamics_kwargs = {} if dynamics_kwargs is None else dict(dynamics_kwargs)
+        scene_kwargs = {} if scene_kwargs is None else dict(scene_kwargs)
+        sensor_kwargs = list(sensor_kwargs) if sensor_kwargs is not None else []
+
         super().__init__(
             num_agent_per_scene=num_agent_per_scene,
             num_scene=num_scene,
@@ -83,7 +93,9 @@ class MultiNavigationEnv(MultiDroneGymEnvBase):
     def path(self):
         raise ValueError("Path tracking is unavailable without habitat_sim.")
 
-    def get_observation(self, indices=None) -> Dict:
+    def get_observation(
+        self, indices: th.Tensor | slice | int | list[int] | None = None
+    ) -> dict[str, np.ndarray | th.Tensor]:
         swarm = th.zeros(
             (
                 self.num_agent,

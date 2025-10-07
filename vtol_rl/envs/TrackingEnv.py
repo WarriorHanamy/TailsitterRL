@@ -1,8 +1,13 @@
-import numpy as np
-from .base.droneGymEnv import DroneGymEnvsBase
-from typing import Optional, Dict
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 import torch as th
 from gymnasium import spaces
+import numpy as np
+
+from .base.droneGymEnv import DroneGymEnvsBase
 from vtol_rl.utils.type import TensorDict
 
 
@@ -14,12 +19,12 @@ class TrackEnv(DroneGymEnvsBase):
         seed: int = 42,
         visual: bool = False,
         requires_grad: bool = False,
-        random_kwargs: dict = {},
-        dynamics_kwargs: dict = {},
-        scene_kwargs: dict = {},
-        sensor_kwargs: list = [],
+        random_kwargs: Mapping[str, Any] | None = None,
+        dynamics_kwargs: Mapping[str, Any] | None = None,
+        scene_kwargs: Mapping[str, Any] | None = None,
+        sensor_kwargs: Sequence[Mapping[str, Any]] | None = None,
         device: str = "cpu",
-        target: Optional[th.Tensor] = None,
+        target: th.Tensor | None = None,
         max_episode_steps: int = 256,
         latent_dim=None,
         tensor_output=False,
@@ -52,9 +57,9 @@ class TrackEnv(DroneGymEnvsBase):
             visual=visual,
             requires_grad=requires_grad,
             random_kwargs=random_kwargs,
-            dynamics_kwargs=dynamics_kwargs,
-            sensor_kwargs=sensor_kwargs,
-            scene_kwargs=scene_kwargs,
+            dynamics_kwargs={} if dynamics_kwargs is None else dict(dynamics_kwargs),
+            sensor_kwargs=list(sensor_kwargs) if sensor_kwargs is not None else [],
+            scene_kwargs={} if scene_kwargs is None else dict(scene_kwargs),
             device=device,
             max_episode_steps=max_episode_steps,
             tensor_output=tensor_output,
@@ -87,7 +92,9 @@ class TrackEnv(DroneGymEnvsBase):
             )
         ).permute(1, 2, 0)
 
-    def get_observation(self, indices=None) -> Dict:
+    def get_observation(
+        self, indices: th.Tensor | slice | int | list[int] | None = None
+    ) -> TensorDict:
         diff_pos = self.target - self.position.unsqueeze(1)
         # consider target as next serveral waypoint
         diff_pos_flatten = diff_pos.reshape(self.num_envs, -1)
@@ -133,12 +140,12 @@ class TrackEnv2(TrackEnv):
         seed: int = 42,
         visual: bool = False,
         requires_grad: bool = False,
-        random_kwargs: dict = {},
-        dynamics_kwargs: dict = {},
-        scene_kwargs: dict = {},
-        sensor_kwargs: list = [],
+        random_kwargs: Mapping[str, Any] | None = None,
+        dynamics_kwargs: Mapping[str, Any] | None = None,
+        scene_kwargs: Mapping[str, Any] | None = None,
+        sensor_kwargs: Sequence[Mapping[str, Any]] | None = None,
         device: str = "cpu",
-        target: Optional[th.Tensor] = None,
+        target: th.Tensor | None = None,
         max_episode_steps: int = 256,
         latent_dim=None,
         tensor_output=False,
@@ -150,9 +157,9 @@ class TrackEnv2(TrackEnv):
             visual=visual,
             requires_grad=requires_grad,
             random_kwargs=random_kwargs,
-            dynamics_kwargs=dynamics_kwargs,
-            scene_kwargs=scene_kwargs,
-            sensor_kwargs=sensor_kwargs,
+            dynamics_kwargs={} if dynamics_kwargs is None else dict(dynamics_kwargs),
+            scene_kwargs={} if scene_kwargs is None else dict(scene_kwargs),
+            sensor_kwargs=list(sensor_kwargs) if sensor_kwargs is not None else [],
             device=device,
             max_episode_steps=max_episode_steps,
             target=target,
@@ -167,7 +174,9 @@ class TrackEnv2(TrackEnv):
             dtype=np.float32,
         )
 
-    def get_observation(self, indices=None) -> Dict:
+    def get_observation(
+        self, indices: th.Tensor | slice | int | list[int] | None = None
+    ) -> TensorDict:
         diff_pos = self.target - self.position.unsqueeze(1)
         # consider target as next serveral waypoint
         diff_pos_flatten = diff_pos.reshape(self.num_envs, -1)

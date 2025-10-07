@@ -30,7 +30,7 @@ description = "Reinforcement Learning for Tailsitter UAVs"
 license = {text = "MIT"}
 name = "vtol_rl"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 version = "0.1.0"
 
 [tool.setuptools.packages.find]

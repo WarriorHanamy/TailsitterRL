@@ -1,4 +1,7 @@
-from typing import Union, Optional, Dict, List
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 import numpy as np
 import torch as th
@@ -60,14 +63,19 @@ class CatchEnv(DroneGymEnvsBase):
         seed: int = 42,
         visual: bool = False,
         max_episode_steps: int = 1000,
-        device: Optional[th.device] = th.device("cpu"),
-        dynamics_kwargs=None,
-        random_kwargs=None,
+        device: th.device | str = th.device("cpu"),
+        dynamics_kwargs: Mapping[str, Any] | None = None,
+        random_kwargs: Mapping[str, Any] | None = None,
         requires_grad: bool = False,
-        scene_kwargs: Optional[Dict] = None,
-        sensor_kwargs: Optional[List] = None,
+        scene_kwargs: Mapping[str, Any] | None = None,
+        sensor_kwargs: Sequence[Mapping[str, Any]] | None = None,
         latent_dim=None,
     ):
+        dynamics_kwargs = {} if dynamics_kwargs is None else dict(dynamics_kwargs)
+        random_kwargs = {} if random_kwargs is None else dict(random_kwargs)
+        scene_kwargs = {} if scene_kwargs is None else dict(scene_kwargs)
+        sensor_kwargs = list(sensor_kwargs) if sensor_kwargs is not None else []
+
         super().__init__(
             num_agent_per_scene=num_agent_per_scene,
             num_scene=num_scene,
@@ -95,5 +103,5 @@ class CatchEnv(DroneGymEnvsBase):
 
     def get_reward(
         self,
-    ) -> Union[np.ndarray, th.Tensor]:
+    ) -> np.ndarray | th.Tensor:
         pass

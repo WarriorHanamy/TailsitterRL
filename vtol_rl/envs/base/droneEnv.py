@@ -1,11 +1,16 @@
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 import torch
-from dataclasses import dataclass
+from vtol_rl.utils.randomization import IMUStateRandomizer
 from vtol_rl.utils.randomization import (
     UniformStateRandomizer,
     load_generator,
 )
-from vtol_rl.utils.randomization import IMUStateRandomizer
 
 from .dynamics import Dynamics
 
@@ -33,15 +38,25 @@ class DroneEnvsBase:
         num_scene: int = 1,
         seed: int = 42,
         visual: bool = False,
-        random_kwargs: dict | None = {},
-        dynamics_kwargs: dict | None = {},
-        scene_kwargs: dict | None = {},
-        sensor_kwargs: dict | None = {},
+        random_kwargs: Mapping[str, Any] | None = None,
+        dynamics_kwargs: Mapping[str, Any] | None = None,
+        scene_kwargs: Mapping[str, Any] | None = None,
+        sensor_kwargs: Sequence[Mapping[str, Any]] | None = None,
         uav_radius: float = 0.1,
         sensitive_radius: float = 10.0,
         multi_drone: bool = False,
-        device: type[torch.device] | None = torch.device("cpu"),
+        device: torch.device | str = torch.device("cpu"),
     ):
+        random_kwargs = {} if random_kwargs is None else dict(random_kwargs)
+        dynamics_kwargs = {} if dynamics_kwargs is None else dict(dynamics_kwargs)
+        scene_kwargs = {} if scene_kwargs is None else dict(scene_kwargs)
+        sensor_kwargs = (
+            [dict(sensor) for sensor in sensor_kwargs]
+            if sensor_kwargs is not None
+            else []
+        )
+
+        device = torch.device(device)
         self.device = device
         self.seed = seed
 
@@ -81,9 +96,7 @@ class DroneEnvsBase:
 
         self._create_bbox()
         self._sensor_list = (
-            [sensor["uuid"] for sensor in sensor_kwargs]
-            if sensor_kwargs is not None
-            else []
+            [sensor["uuid"] for sensor in sensor_kwargs] if sensor_kwargs else []
         )
         self._visual_sensor_list = [s for s in self._sensor_list if "IMU" not in s]
 
@@ -128,7 +141,7 @@ class DroneEnvsBase:
             self._bboxes = bboxes
             self._flatten_bboxes = [bbox.flatten() for bbox in bboxes]
 
-    def _create_randomizer(self, random_kwargs: dict):
+    def _create_randomizer(self, random_kwargs: Mapping[str, Any]) -> list:
         default_state_generator_config = {
             "class": UniformStateRandomizer,
             "kwargs": {

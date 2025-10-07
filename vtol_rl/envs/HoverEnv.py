@@ -1,9 +1,14 @@
-from vtol_rl.utils.randomization import UniformStateRandomizer
-from .base.tailsitterGymEnvs import TailsitterEnvsBase
-from typing import Optional, Dict
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 import torch
-from vtol_rl.utils.type import TensorDict
+
+from .base.tailsitterGymEnvs import TailsitterEnvsBase
 from vtol_rl.utils.logger import setup_logger
+from vtol_rl.utils.randomization import UniformStateRandomizer
+from vtol_rl.utils.type import TensorDict
 
 UniformStateRandomizer
 
@@ -17,13 +22,13 @@ class HoverEnv(TailsitterEnvsBase):
         num_scene: int = 1,
         seed: int = 42,
         requires_grad: bool = False,
-        random_kwargs: dict = None,
-        dynamics_kwargs: dict = {},
-        scene_kwargs: dict = {},
-        sensor_kwargs: list = [],
+        random_kwargs: Mapping[str, Any] | None = None,
+        dynamics_kwargs: Mapping[str, Any] | None = None,
+        scene_kwargs: Mapping[str, Any] | None = None,
+        sensor_kwargs: Sequence[Mapping[str, Any]] | None = None,
         device: str = "cpu",
         visual: bool = False,
-        target: Optional[torch.Tensor] = None,
+        target: torch.Tensor | None = None,
         max_episode_steps: int = 256,
         tensor_output: bool = False,
     ):
@@ -61,9 +66,9 @@ class HoverEnv(TailsitterEnvsBase):
             seed=seed,
             requires_grad=requires_grad,
             random_kwargs=random_kwargs,
-            dynamics_kwargs=dynamics_kwargs,
-            sensor_kwargs=sensor_kwargs,
-            scene_kwargs=scene_kwargs,
+            dynamics_kwargs={} if dynamics_kwargs is None else dict(dynamics_kwargs),
+            sensor_kwargs=list(sensor_kwargs) if sensor_kwargs is not None else [],
+            scene_kwargs={} if scene_kwargs is None else dict(scene_kwargs),
             device=device,
             max_episode_steps=max_episode_steps,
             tensor_output=tensor_output,
@@ -74,7 +79,7 @@ class HoverEnv(TailsitterEnvsBase):
         ).reshape(1, -1)
         self.success_radius = 0.5
 
-    def get_observation(self, indices=None) -> Dict:
+    def get_observation(self, indices: torch.Tensor | slice | int | list[int] | None = None) -> TensorDict:
         obs = TensorDict(
             {
                 "state": self.state,

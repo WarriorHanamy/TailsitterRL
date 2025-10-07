@@ -1,10 +1,15 @@
-from stable_baselines3.common.vec_env import VecEnv
-from .droneEnv import DroneEnvsBase
-from typing import Union
-from gymnasium import spaces
-import numpy as np
+from __future__ import annotations
+
 from abc import abstractmethod
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+import numpy as np
 import torch
+from gymnasium import spaces
+from stable_baselines3.common.vec_env import VecEnv
+
+from .droneEnv import DroneEnvsBase
 from vtol_rl.utils.type import ACTION_TYPE, TensorDict
 from vtol_rl.utils.logger import setup_logger
 
@@ -19,14 +24,19 @@ class TailsitterEnvsBase(VecEnv):
         max_episode_steps: int = 1000,
         seed: int = 42,  # control the randomzation of envs for consistency
         device: torch.device = torch.device("cpu"),
-        dynamics_kwargs: dict = {},
-        random_kwargs: dict = {},
+        dynamics_kwargs: Mapping[str, Any] | None = None,
+        random_kwargs: Mapping[str, Any] | None = None,
         requires_grad: bool = False,
-        scene_kwargs: dict = {},
-        sensor_kwargs: list = [],
+        scene_kwargs: Mapping[str, Any] | None = None,
+        sensor_kwargs: Sequence[Mapping[str, Any]] | None = None,
         tensor_output: bool = True,
         is_train: bool = False,
     ):
+        dynamics_kwargs = {} if dynamics_kwargs is None else dict(dynamics_kwargs)
+        random_kwargs = {} if random_kwargs is None else dict(random_kwargs)
+        scene_kwargs = {} if scene_kwargs is None else dict(scene_kwargs)
+        sensor_kwargs = list(sensor_kwargs) if sensor_kwargs is not None else []
+
         super(VecEnv, self).__init__()
 
         # raise Warning if device is cuda while num_envs is less than 1e3
@@ -114,8 +124,8 @@ class TailsitterEnvsBase(VecEnv):
 
         # For convenience of intuitive visualization of reward components
         # self._indiv_reward = self.get_reward()  # 例如 {"reward": 1.0, "speed": 0.5, "penalty": -0.2}
-        self._indiv_rewards: dict = None
-        self._indiv_reward: dict = None
+        self._indiv_rewards: dict[str, torch.Tensor] | None = None
+        self._indiv_reward: dict[str, torch.Tensor] | None = None
         self.max_episode_steps = max_episode_steps
 
         # necessary for gym compatibility
@@ -316,8 +326,8 @@ class TailsitterEnvsBase(VecEnv):
         self.envs.reset()
 
         if isinstance(self.get_reward(), dict):
-            self._indiv_reward: dict = self.get_reward()
-            self._indiv_rewards: dict = self._indiv_reward
+            self._indiv_reward: dict[str, torch.Tensor] = self.get_reward()
+            self._indiv_rewards: dict[str, torch.Tensor] = self._indiv_reward
             self._indiv_rewards = {
                 key: torch.zeros((self.num_agent,))
                 for key in self._indiv_rewards.keys()
@@ -485,20 +495,14 @@ class TailsitterEnvsBase(VecEnv):
         return _failure
 
     @abstractmethod
-    def get_reward(
-        self,
-    ) -> Union[np.ndarray, torch.Tensor]:
+    def get_reward(self) -> np.ndarray | torch.Tensor:
         _rewards = np.empty(self.num_agent)
 
         return _rewards
 
     @abstractmethod
-    def get_observation(self, indice=None) -> dict:
-        observations = {
-            "depth": np.zeros([self.num_agent, 255, 255, 3], dtype=np.uint8),
-            "state": np.zeros([self.num_agent, 13], dtype=np.float32),
-        }
-        return observations
+    def get_observation(self, indice=None) -> TensorDict:
+        raise NotImplementedError
 
     def get_full_observation(self, indice=None):
         obs = self.get_observation()

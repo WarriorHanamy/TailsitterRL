@@ -1,13 +1,10 @@
-import json
-from dataclasses import dataclass
-from typing import Dict, Iterator, Tuple, Any, Optional
+from __future__ import annotations
 
-try:
-    # Python 3.9+
-    from importlib.resources import files, as_file
-except Exception:  # pragma: no cover
-    # <= Python 3.8
-    from importlib_resources import files, as_file  # type: ignore
+import json
+from collections.abc import Iterator
+from dataclasses import dataclass
+from importlib.resources import as_file, files
+from typing import Any
 
 
 ROOT_PKG = __name__
@@ -29,7 +26,7 @@ class JsonResource:
                 return json.load(f)
 
 
-def iter_jsons(*, under: Optional[str] = None) -> Iterator[Tuple[str, JsonResource]]:
+def iter_jsons(*, under: str | None = None) -> Iterator[tuple[str, JsonResource]]:
     """
     Iterate over all *.json files under config (or under a specified subdirectory),
     yielding (relpath, JsonResource). relpath is relative to config, e.g. 'submoduleA/a1.json'.
@@ -50,17 +47,19 @@ def load_json(relpath: str, *, encoding: str = "utf-8") -> Any:
     return JsonResource(relpath).load(encoding=encoding)
 
 
-def load_all(*, under: Optional[str] = None, encoding: str = "utf-8") -> Dict[str, Any]:
+def load_all(*, under: str | None = None, encoding: str = "utf-8") -> dict[str, Any]:
     """
     Load all (or all under a specified subdirectory) JSON files at once, return {relpath: data}
     """
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     for rel, res in iter_jsons(under=under):
         out[rel] = res.load(encoding=encoding)
     return out
 
 
-def load_grouped_by_topdir(*, encoding: str = "utf-8") -> Dict[str, Dict[str, Any]]:
+def load_grouped_by_topdir(
+    *, encoding: str = "utf-8"
+) -> dict[str, dict[str, Any]]:
     """
     Load and group JSON files by top-level subdirectory under config, e.g. returns:
     {
@@ -68,7 +67,7 @@ def load_grouped_by_topdir(*, encoding: str = "utf-8") -> Dict[str, Dict[str, An
         "submoduleB": {"b1.json": {...}},
     }
     """
-    grouped: Dict[str, Dict[str, Any]] = {}
+    grouped: dict[str, dict[str, Any]] = {}
     for rel, res in iter_jsons():
         parts = rel.split("/", 1)
         top = parts[0]

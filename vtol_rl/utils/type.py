@@ -27,7 +27,7 @@ class ACTION_TYPE(Enum):
     POSITION = 3
 
 
-action_type_alias: dict = {
+action_type_alias: dict[str, ACTION_TYPE] = {
     "thrust": ACTION_TYPE.THRUST,
     "bodyrate": ACTION_TYPE.BODYRATE,
     "velocity": ACTION_TYPE.VELOCITY,
